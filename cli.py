@@ -644,6 +644,7 @@ _SKIN_THEMES: Dict[str, Dict[str, str]] = {
         "prompt": "#FFF8DC",
         "prompt-working": "#888888 italic",
         "hint": "#555555 italic",
+        "spinner": "#FFBF00",
         "input-rule": "#CD7F32",
         "image-badge": "#87CEEB bold",
         "completion-menu": "bg:#1a1a2e #FFF8DC",
@@ -675,6 +676,7 @@ _SKIN_THEMES: Dict[str, Dict[str, str]] = {
         "prompt": "#c9d1d9",
         "prompt-working": "#666666 italic",
         "hint": "#444444 italic",
+        "spinner": "#aaaaaa",
         "input-rule": "#444444",
         "image-badge": "#888888 bold",
         "completion-menu": "bg:#111111 #e6edf3",
@@ -706,6 +708,7 @@ _SKIN_THEMES: Dict[str, Dict[str, str]] = {
         "prompt": "#7eb8f6",
         "prompt-working": "#4b5563 italic",
         "hint": "#4b5563 italic",
+        "spinner": "#7eb8f6",
         "input-rule": "#4169e1",
         "image-badge": "#8EA8FF bold",
         "completion-menu": "bg:#0b0e14 #c9d1d9",
@@ -871,8 +874,12 @@ def build_welcome_banner(console: Console, model: str, cwd: str, tools: List[dic
     layout_table.add_column("left", justify="center")
     layout_table.add_column("right", justify="left")
     
-    # Build left content: caduceus + model info
-    left_lines = ["", HERMES_CADUCEUS, ""]
+    # Build left content: caduceus always in panel (at >= 40 cols) + model info
+    _cols_panel = shutil.get_terminal_size().columns
+    if _cols_panel >= 40:
+        left_lines = ["", HERMES_CADUCEUS, ""]
+    else:
+        left_lines = [""]
     
     # Shorten model name for display
     model_short = model.split("/")[-1] if "/" in model else model
@@ -996,14 +1003,14 @@ def build_welcome_banner(console: Console, model: str, cwd: str, tools: List[dic
         padding=(0, 2),
     )
     
-    # Print branding: full block logo at >= 100 cols, caduceus art at >= 40, text box below that
+    # Standalone branding: block logo at >= 100 cols only.
+    # At 40-99 cols the caduceus lives inside the panel left column (no standalone).
+    # Below 40 cols show a compact text box.
     console.print()
     _cols = shutil.get_terminal_size().columns
     if _cols >= 100:
         console.print(HERMES_AGENT_LOGO)
-    elif _cols >= 40:
-        console.print(CADUCEUS_BANNER)
-    else:
+    elif _cols < 40:
         console.print(COMPACT_BANNER)
     console.print()
     
@@ -1016,6 +1023,7 @@ def build_welcome_banner(console: Console, model: str, cwd: str, tools: List[dic
 # ============================================================================
 
 from agent.skill_commands import scan_skill_commands, get_skill_commands, build_skill_invocation_message
+from agent.display import set_tui_invalidate_cb, get_tui_spinner_text
 
 _skill_commands = scan_skill_commands()
 
@@ -1557,8 +1565,16 @@ class HermesCLI:
         
         if _skill_commands:
             _cprint(f"\n  ⚡ {_BOLD}Skill Commands{_RST} ({len(_skill_commands)} installed):")
+            import shutil as _sh
+            _cols = _sh.get_terminal_size().columns
+            # prefix: 2 indent + 22 cmd + 3 " - " = 27 chars; leave 2 margin
+            _desc_max = max(30, _cols - 29)
             for cmd, info in sorted(_skill_commands.items()):
-                _cprint(f"  {_GOLD}{cmd:<22}{_RST} {_DIM}-{_RST} {info['description']}")
+                desc = info['description']
+                # Use first sentence only, then truncate to fit terminal width
+                first_sentence = desc.split('.')[0].strip()
+                display = first_sentence if len(first_sentence) <= _desc_max else first_sentence[:_desc_max - 3] + '...'
+                _cprint(f"  {_GOLD}{cmd:<22}{_RST} {_DIM}-{_RST} {display}")
 
         _cprint(f"\n  {_DIM}Tip: Just type your message to chat with Hermes!{_RST}")
         _cprint(f"  {_DIM}Multi-line: Alt+Enter for a new line{_RST}")
@@ -2372,7 +2388,7 @@ class HermesCLI:
             self._handle_paste_command()
         elif cmd_lower == "/reload-mcp":
             self._reload_mcp()
-        elif cmd_lower.startswith("/skin"):
+        elif cmd_lower == "/skin" or cmd_lower.startswith("/skin ") or cmd_lower.startswith("/skin:"):
             self._handle_skin_command(cmd_original)
         else:
             # Check for skill slash commands (/gif-search, /axolotl, etc.)
@@ -2613,19 +2629,8 @@ class HermesCLI:
         except Exception as e:
             print(f"  MCP reload failed: {e}")
 
-    def _handle_skin_command(self, cmd: str) -> None:
-        """Handle /skin [name] — switch the terminal color theme at runtime."""
-        parts = cmd.strip().split(maxsplit=1)
-        available = list(_SKIN_THEMES.keys())
-        if len(parts) < 2:
-            print(f"Current skin: {self._current_skin}")
-            print(f"Available: {', '.join(available)}")
-            print("Usage: /skin <name>")
-            return
-        name = parts[1].strip().lower()
-        if name not in _SKIN_THEMES:
-            print(f"Unknown skin: {name}  (available: {', '.join(available)})")
-            return
+    def _apply_skin(self, name: str) -> None:
+        """Apply a skin by name and persist it."""
         self._current_skin = name
         if self._app:
             self._app.style = PTStyle.from_dict(_SKIN_THEMES[name])
@@ -2634,6 +2639,46 @@ class HermesCLI:
             print(f"Skin set to: {name} (saved)")
         else:
             print(f"Skin set to: {name}")
+
+    def _handle_skin_command(self, cmd: str) -> None:
+        """Handle /skin [name|:toggle|:create <desc>]."""
+        available = list(_SKIN_THEMES.keys())
+        # Normalize: strip leading "/skin" and optional colon/space
+        rest = cmd.strip()
+        if rest.lower().startswith("/skin:"):
+            sub = rest[6:].strip()          # everything after "/skin:"
+            keyword = sub.split()[0].lower() if sub else ""
+            if keyword == "toggle":
+                idx = available.index(self._current_skin) if self._current_skin in available else 0
+                next_name = available[(idx + 1) % len(available)]
+                self._apply_skin(next_name)
+                return
+            if keyword == "create":
+                description = sub[6:].strip()  # everything after "create"
+                create_cmd = "/skin-create"
+                if create_cmd in _skill_commands:
+                    msg = build_skill_invocation_message(create_cmd, description)
+                    if msg and hasattr(self, '_pending_input'):
+                        skill_name = _skill_commands[create_cmd]["name"]
+                        print(f"\n  loading skill: {skill_name}")
+                        self._pending_input.put(msg)
+                        return
+                print("skin-create skill not found — install it first")
+                return
+            print(f"Unknown sub-command: /skin:{keyword}  (available: toggle, create)")
+            return
+
+        parts = rest.split(maxsplit=1)
+        if len(parts) < 2:
+            print(f"Current skin: {self._current_skin}")
+            print(f"Available: {', '.join(available)}")
+            print("Usage: /skin <name>  |  /skin:toggle  |  /skin:create <description>")
+            return
+        name = parts[1].strip().lower()
+        if name not in _SKIN_THEMES:
+            print(f"Unknown skin: {name}  (available: {', '.join(available)})")
+            return
+        self._apply_skin(name)
 
     def _clarify_callback(self, question, choices):
         """
@@ -3381,6 +3426,10 @@ class HermesCLI:
                     ('class:clarify-countdown', countdown),
                 ]
 
+            spinner_line = get_tui_spinner_text()
+            if spinner_line:
+                return [('class:spinner', spinner_line)]
+
             return []
 
         def get_hint_height():
@@ -3410,6 +3459,8 @@ class HermesCLI:
             box_w = min(max(cols - 2, len(title) + 8), 72)
             top_fill = '─' * max(0, box_w - len(title) - 5)  # ╭─ [sp] title [sp] fill ╮
             bot_fill = '─' * (box_w - 2)
+            max_text = box_w - 4
+            question_display = question[:max_text - 3] + '...' if len(question) > max_text else question
 
             frags = []
             frags.append(('class:clarify-border', '╭─ '))
@@ -3418,7 +3469,7 @@ class HermesCLI:
             frags.append(('class:clarify-border', '│\n'))
 
             frags.append(('class:clarify-border', '│  '))
-            frags.append(('class:clarify-question', question))
+            frags.append(('class:clarify-question', question_display))
             frags.append(('', '\n'))
             frags.append(('class:clarify-border', '│\n'))
 
@@ -3495,7 +3546,6 @@ class HermesCLI:
             choices = state["choices"]
             selected = state.get("selected", 0)
 
-            cmd_display = command[:70] + '...' if len(command) > 70 else command
             choice_labels = {
                 "once": "Allow once",
                 "session": "Allow for this session",
@@ -3508,13 +3558,17 @@ class HermesCLI:
             box_w = min(max(cols - 2, len(title) + 8), 72)
             top_fill = '─' * max(0, box_w - len(title) - 5)
             bot_fill = '─' * (box_w - 2)
+            # Interior text width: box_w minus left border (1) + indent (2) + right border (1)
+            max_text = box_w - 4
+            cmd_display = command[:max_text - 3] + '...' if len(command) > max_text else command
+            desc_display = description[:max_text - 3] + '...' if len(description) > max_text else description
             frags = []
             frags.append(('class:approval-border', '╭─ '))
             frags.append(('class:approval-title', title))
             frags.append(('class:approval-border', f' {top_fill}╮\n'))
             frags.append(('class:approval-border', '│\n'))
             frags.append(('class:approval-border', '│  '))
-            frags.append(('class:approval-desc', description))
+            frags.append(('class:approval-desc', desc_display))
             frags.append(('', '\n'))
             frags.append(('class:approval-border', '│  '))
             frags.append(('class:approval-cmd', cmd_display))
@@ -3622,8 +3676,16 @@ class HermesCLI:
                     if isinstance(user_input, tuple):
                         user_input, submit_images = user_input
                     
-                    # Check for commands
-                    if isinstance(user_input, str) and user_input.startswith("/"):
+                    # Check for commands.
+                    # Guard: file paths (e.g. /var/folders/..., /Users/...) start with /
+                    # but are not slash commands. A real command's first word never
+                    # contains a second / — file paths always do.
+                    _is_command = (
+                        isinstance(user_input, str)
+                        and user_input.startswith("/")
+                        and "/" not in user_input.split()[0][1:]
+                    ) if isinstance(user_input, str) and user_input.strip() else False
+                    if _is_command:
                         print(f"\n⚙️  {user_input}")
                         if not self.process_command(user_input):
                             self._should_exit = True
@@ -3682,9 +3744,11 @@ class HermesCLI:
         atexit.register(_run_cleanup)
         
         # Run the application with patch_stdout for proper output handling.
-        # Set HERMES_IN_TUI so KawaiiSpinner suppresses \r-based animation
-        # (patch_stdout doesn't support carriage-return overwrite; it would
-        # emit a new rendered line per tick, flooding the output area).
+        # Register invalidate callback so KawaiiSpinner can refresh the hint
+        # area from its animation thread without writing to stdout.
+        set_tui_invalidate_cb(lambda: self._app and self._app.invalidate())
+        # Set HERMES_IN_TUI so KawaiiSpinner routes frames through the hint
+        # area instead of raw \r-based stdout writes (which flood patch_stdout).
         os.environ["HERMES_IN_TUI"] = "1"
         try:
             with patch_stdout():
