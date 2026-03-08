@@ -910,6 +910,51 @@ def cmd_uninstall(args):
     run_uninstall(args)
 
 
+def _find_venv():
+    """Find the virtual environment directory (.venv or venv)."""
+    for name in (".venv", "venv"):
+        candidate = PROJECT_ROOT / name
+        if candidate.exists():
+            return candidate
+    return PROJECT_ROOT / "venv"  # fallback
+
+
+def _get_install_extras():
+    """Detect which optional extras are currently installed and return pip install spec."""
+    extras = []
+    # Check for installed optional packages and map to extras
+    extra_markers = {
+        "honcho": "honcho_ai",
+        "mcp": "mcp",
+        "messaging": "telegram",
+        "slack": "slack_bolt",
+        "cron": "croniter",
+        "cli": "simple_term_menu",
+        "tts-premium": "elevenlabs",
+        "pty": "ptyprocess",
+        "homeassistant": "aiohttp",
+    }
+    for extra_name, pkg in extra_markers.items():
+        try:
+            __import__(pkg)
+            extras.append(extra_name)
+        except ImportError:
+            pass
+    # Also check ~/.honcho/config.json — if it exists with enabled=true, ensure honcho extra
+    honcho_cfg = Path.home() / ".honcho" / "config.json"
+    if honcho_cfg.exists() and "honcho" not in extras:
+        try:
+            import json
+            cfg = json.loads(honcho_cfg.read_text())
+            if cfg.get("enabled"):
+                extras.append("honcho")
+        except Exception:
+            pass
+    if extras:
+        return f".[{','.join(extras)}]"
+    return "."
+
+
 def _update_via_zip(args):
     """Update Hermes Agent by downloading a ZIP archive.
     
@@ -972,17 +1017,20 @@ def _update_via_zip(args):
     # Reinstall Python dependencies
     print("→ Updating Python dependencies...")
     import subprocess
+    venv_dir = _find_venv()
+    install_spec = _get_install_extras()
+    print(f"  Installing: {install_spec}")
     uv_bin = shutil.which("uv")
     if uv_bin:
         subprocess.run(
-            [uv_bin, "pip", "install", "-e", ".", "--quiet"],
+            [uv_bin, "pip", "install", "-e", install_spec, "--quiet"],
             cwd=PROJECT_ROOT, check=True,
-            env={**os.environ, "VIRTUAL_ENV": str(PROJECT_ROOT / "venv")}
+            env={**os.environ, "VIRTUAL_ENV": str(venv_dir)}
         )
     else:
-        venv_pip = PROJECT_ROOT / "venv" / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
+        venv_pip = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
         if venv_pip.exists():
-            subprocess.run([str(venv_pip), "install", "-e", ".", "--quiet"], cwd=PROJECT_ROOT, check=True)
+            subprocess.run([str(venv_pip), "install", "-e", install_spec, "--quiet"], cwd=PROJECT_ROOT, check=True)
     
     # Sync skills
     try:
@@ -1079,19 +1127,22 @@ def cmd_update(args):
         
         # Reinstall Python dependencies (prefer uv for speed, fall back to pip)
         print("→ Updating Python dependencies...")
+        venv_dir = _find_venv()
+        install_spec = _get_install_extras()
+        print(f"  Installing: {install_spec}")
         uv_bin = shutil.which("uv")
         if uv_bin:
             subprocess.run(
-                [uv_bin, "pip", "install", "-e", ".", "--quiet"],
+                [uv_bin, "pip", "install", "-e", install_spec, "--quiet"],
                 cwd=PROJECT_ROOT, check=True,
-                env={**os.environ, "VIRTUAL_ENV": str(PROJECT_ROOT / "venv")}
+                env={**os.environ, "VIRTUAL_ENV": str(venv_dir)}
             )
         else:
-            venv_pip = PROJECT_ROOT / "venv" / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
+            venv_pip = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
             if venv_pip.exists():
-                subprocess.run([str(venv_pip), "install", "-e", ".", "--quiet"], cwd=PROJECT_ROOT, check=True)
+                subprocess.run([str(venv_pip), "install", "-e", install_spec, "--quiet"], cwd=PROJECT_ROOT, check=True)
             else:
-                subprocess.run(["pip", "install", "-e", ".", "--quiet"], cwd=PROJECT_ROOT, check=True)
+                subprocess.run(["pip", "install", "-e", install_spec, "--quiet"], cwd=PROJECT_ROOT, check=True)
         
         # Check for Node.js deps
         if (PROJECT_ROOT / "package.json").exists():

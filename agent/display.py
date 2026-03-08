@@ -178,7 +178,7 @@ class KawaiiSpinner:
 
     def _animate(self):
         while self.running:
-            if os.getenv("HERMES_SPINNER_PAUSE"):
+            if os.getenv("HERMES_SPINNER_PAUSE") or os.getenv("HERMES_IN_TUI"):
                 time.sleep(0.1)
                 continue
             frame = self.spinner_frames[self.frame_idx % len(self.spinner_frames)]
@@ -209,8 +209,10 @@ class KawaiiSpinner:
         Thread-safe: uses the captured stdout reference (self._out).
         Works inside redirect_stdout(devnull) because _write bypasses
         sys.stdout and writes to the stdout captured at spinner creation.
+        In TUI mode (HERMES_IN_TUI), skips the \r clear since patch_stdout
+        doesn't support carriage-return overwrite.
         """
-        if not self.running:
+        if not self.running or os.getenv("HERMES_IN_TUI"):
             self._write(f"  {text}", flush=True)
             return
         # Clear spinner line with spaces (not \033[K) to avoid garbled escape
@@ -223,10 +225,11 @@ class KawaiiSpinner:
         self.running = False
         if self.thread:
             self.thread.join(timeout=0.5)
-        # Clear the spinner line with spaces instead of \033[K to avoid
-        # garbled escape codes when prompt_toolkit's patch_stdout is active.
-        blanks = ' ' * max(self.last_line_len + 5, 40)
-        self._write(f"\r{blanks}\r", end='', flush=True)
+        if not os.getenv("HERMES_IN_TUI"):
+            # Clear the spinner line with spaces instead of \033[K to avoid
+            # garbled escape codes when prompt_toolkit's patch_stdout is active.
+            blanks = ' ' * max(self.last_line_len + 5, 40)
+            self._write(f"\r{blanks}\r", end='', flush=True)
         if final_message:
             self._write(f"  {final_message}", flush=True)
 

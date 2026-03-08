@@ -38,6 +38,7 @@ COMMANDS = {
     "/insights": "Show usage insights and analytics (last 30 days)",
     "/paste": "Check clipboard for an image and attach it",
     "/reload-mcp": "Reload MCP servers from config.yaml",
+    "/skin": "Switch terminal color theme (default, mono, slate)",
     "/quit": "Exit the CLI (also: /exit, /q)",
 }
 

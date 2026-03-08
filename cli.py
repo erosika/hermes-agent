@@ -356,7 +356,7 @@ from model_tools import get_tool_definitions, get_toolset_for_tool
 # Extracted CLI modules (Phase 3)
 from hermes_cli.banner import (
     cprint as _cprint, _GOLD, _BOLD, _DIM, _RST,
-    VERSION, HERMES_AGENT_LOGO, HERMES_CADUCEUS, COMPACT_BANNER,
+    VERSION, HERMES_AGENT_LOGO, HERMES_CADUCEUS, CADUCEUS_BANNER, COMPACT_BANNER,
     get_available_skills as _get_available_skills,
     build_welcome_banner,
 )
@@ -633,6 +633,106 @@ _BOLD = "\033[1m"
 _DIM = "\033[2m"
 _RST = "\033[0m"
 
+# ---------------------------------------------------------------------------
+# Skin themes — mapped to prompt_toolkit style class names.
+# Switch at runtime with /skin <name>.
+# ---------------------------------------------------------------------------
+_SKIN_THEMES: Dict[str, Dict[str, str]] = {
+    "default": {
+        "input-area": "#FFF8DC",
+        "placeholder": "#555555 italic",
+        "prompt": "#FFF8DC",
+        "prompt-working": "#888888 italic",
+        "hint": "#555555 italic",
+        "input-rule": "#CD7F32",
+        "image-badge": "#87CEEB bold",
+        "completion-menu": "bg:#1a1a2e #FFF8DC",
+        "completion-menu.completion": "bg:#1a1a2e #FFF8DC",
+        "completion-menu.completion.current": "bg:#333355 #FFD700",
+        "completion-menu.meta.completion": "bg:#1a1a2e #888888",
+        "completion-menu.meta.completion.current": "bg:#333355 #FFBF00",
+        "clarify-border": "#CD7F32",
+        "clarify-title": "#FFD700 bold",
+        "clarify-question": "#FFF8DC bold",
+        "clarify-choice": "#AAAAAA",
+        "clarify-selected": "#FFD700 bold",
+        "clarify-active-other": "#FFD700 italic",
+        "clarify-countdown": "#CD7F32",
+        "sudo-prompt": "#FF6B6B bold",
+        "sudo-border": "#CD7F32",
+        "sudo-title": "#FF6B6B bold",
+        "sudo-text": "#FFF8DC",
+        "approval-border": "#CD7F32",
+        "approval-title": "#FF8C00 bold",
+        "approval-desc": "#FFF8DC bold",
+        "approval-cmd": "#AAAAAA italic",
+        "approval-choice": "#AAAAAA",
+        "approval-selected": "#FFD700 bold",
+    },
+    "mono": {
+        "input-area": "#e6edf3",
+        "placeholder": "#444444 italic",
+        "prompt": "#c9d1d9",
+        "prompt-working": "#666666 italic",
+        "hint": "#444444 italic",
+        "input-rule": "#444444",
+        "image-badge": "#888888 bold",
+        "completion-menu": "bg:#111111 #e6edf3",
+        "completion-menu.completion": "bg:#111111 #e6edf3",
+        "completion-menu.completion.current": "bg:#333333 #ffffff",
+        "completion-menu.meta.completion": "bg:#111111 #666666",
+        "completion-menu.meta.completion.current": "bg:#333333 #aaaaaa",
+        "clarify-border": "#555555",
+        "clarify-title": "#e6edf3 bold",
+        "clarify-question": "#e6edf3",
+        "clarify-choice": "#888888",
+        "clarify-selected": "#ffffff bold",
+        "clarify-active-other": "#aaaaaa italic",
+        "clarify-countdown": "#666666",
+        "sudo-prompt": "#e6edf3 bold",
+        "sudo-border": "#555555",
+        "sudo-title": "#e6edf3 bold",
+        "sudo-text": "#e6edf3",
+        "approval-border": "#555555",
+        "approval-title": "#aaaaaa bold",
+        "approval-desc": "#e6edf3 bold",
+        "approval-cmd": "#888888 italic",
+        "approval-choice": "#888888",
+        "approval-selected": "#ffffff bold",
+    },
+    "slate": {
+        "input-area": "#c9d1d9",
+        "placeholder": "#4b5563 italic",
+        "prompt": "#7eb8f6",
+        "prompt-working": "#4b5563 italic",
+        "hint": "#4b5563 italic",
+        "input-rule": "#4169e1",
+        "image-badge": "#8EA8FF bold",
+        "completion-menu": "bg:#0b0e14 #c9d1d9",
+        "completion-menu.completion": "bg:#0b0e14 #c9d1d9",
+        "completion-menu.completion.current": "bg:#1a2233 #7eb8f6",
+        "completion-menu.meta.completion": "bg:#0b0e14 #4b5563",
+        "completion-menu.meta.completion.current": "bg:#1a2233 #7eb8f6",
+        "clarify-border": "#4169e1",
+        "clarify-title": "#7eb8f6 bold",
+        "clarify-question": "#c9d1d9",
+        "clarify-choice": "#4b5563",
+        "clarify-selected": "#7eb8f6 bold",
+        "clarify-active-other": "#8EA8FF italic",
+        "clarify-countdown": "#4169e1",
+        "sudo-prompt": "#63D0A6 bold",
+        "sudo-border": "#4169e1",
+        "sudo-title": "#63D0A6 bold",
+        "sudo-text": "#c9d1d9",
+        "approval-border": "#4169e1",
+        "approval-title": "#F7A072 bold",
+        "approval-desc": "#c9d1d9 bold",
+        "approval-cmd": "#4b5563 italic",
+        "approval-choice": "#4b5563",
+        "approval-selected": "#7eb8f6 bold",
+    },
+}
+
 def _cprint(text: str):
     """Print ANSI-colored text through prompt_toolkit's native renderer.
 
@@ -896,9 +996,15 @@ def build_welcome_banner(console: Console, model: str, cwd: str, tools: List[dic
         padding=(0, 2),
     )
     
-    # Print the big HERMES-AGENT logo first (no panel wrapper for full width)
+    # Print branding: full block logo at >= 100 cols, caduceus art at >= 40, text box below that
     console.print()
-    console.print(HERMES_AGENT_LOGO)
+    _cols = shutil.get_terminal_size().columns
+    if _cols >= 100:
+        console.print(HERMES_AGENT_LOGO)
+    elif _cols >= 40:
+        console.print(CADUCEUS_BANNER)
+    else:
+        console.print(COMPACT_BANNER)
     console.print()
     
     # Print the panel with caduceus and info
@@ -1107,6 +1213,9 @@ class HermesCLI:
         # History file for persistent input recall across sessions
         self._history_file = Path.home() / ".hermes_history"
         self._last_invalidate: float = 0.0  # throttle UI repaints
+        self._current_skin: str = CLI_CONFIG.get("display", {}).get("skin", "default")
+        if self._current_skin not in _SKIN_THEMES:
+            self._current_skin = "default"
 
     def _invalidate(self, min_interval: float = 0.25) -> None:
         """Throttled UI repaint — prevents terminal blinking on slow/SSH connections."""
@@ -1253,7 +1362,8 @@ class HermesCLI:
         self.console.clear()
         
         if self.compact:
-            self.console.print(COMPACT_BANNER)
+            _cols = shutil.get_terminal_size().columns
+            self.console.print(CADUCEUS_BANNER if _cols >= 40 else COMPACT_BANNER)
             self._show_status()
         else:
             # Get tools for display
@@ -2069,7 +2179,8 @@ class HermesCLI:
             if self._app:
                 cc = ChatConsole()
                 if self.compact:
-                    cc.print(COMPACT_BANNER)
+                    _cols = shutil.get_terminal_size().columns
+                    cc.print(CADUCEUS_BANNER if _cols >= 40 else COMPACT_BANNER)
                 else:
                     tools = get_tool_definitions(enabled_toolsets=self.enabled_toolsets, quiet_mode=True)
                     cwd = os.getenv("TERMINAL_CWD", os.getcwd())
@@ -2085,10 +2196,10 @@ class HermesCLI:
                         session_id=self.session_id,
                         context_length=ctx_len,
                     )
-                _cprint("  ✨ (◕‿◕)✨ Fresh start! Screen cleared and conversation reset.\n")
+                _cprint("  Screen cleared. Conversation reset.\n")
             else:
                 self.show_banner()
-                print("  ✨ (◕‿◕)✨ Fresh start! Screen cleared and conversation reset.\n")
+                print("  Screen cleared. Conversation reset.\n")
         elif cmd_lower == "/history":
             self.show_history()
         elif cmd_lower in ("/reset", "/new"):
@@ -2261,6 +2372,8 @@ class HermesCLI:
             self._handle_paste_command()
         elif cmd_lower == "/reload-mcp":
             self._reload_mcp()
+        elif cmd_lower.startswith("/skin"):
+            self._handle_skin_command(cmd_original)
         else:
             # Check for skill slash commands (/gif-search, /axolotl, etc.)
             base_cmd = cmd_lower.split()[0]
@@ -2498,7 +2611,29 @@ class HermesCLI:
             print(f"  ✅ Agent updated — {len(self.agent.tools if self.agent else [])} tool(s) available")
 
         except Exception as e:
-            print(f"  ❌ MCP reload failed: {e}")
+            print(f"  MCP reload failed: {e}")
+
+    def _handle_skin_command(self, cmd: str) -> None:
+        """Handle /skin [name] — switch the terminal color theme at runtime."""
+        parts = cmd.strip().split(maxsplit=1)
+        available = list(_SKIN_THEMES.keys())
+        if len(parts) < 2:
+            print(f"Current skin: {self._current_skin}")
+            print(f"Available: {', '.join(available)}")
+            print("Usage: /skin <name>")
+            return
+        name = parts[1].strip().lower()
+        if name not in _SKIN_THEMES:
+            print(f"Unknown skin: {name}  (available: {', '.join(available)})")
+            return
+        self._current_skin = name
+        if self._app:
+            self._app.style = PTStyle.from_dict(_SKIN_THEMES[name])
+            self._app.invalidate()
+        if save_config_value("display.skin", name):
+            print(f"Skin set to: {name} (saved)")
+        else:
+            print(f"Skin set to: {name}")
 
     def _clarify_callback(self, question, choices):
         """
@@ -3100,9 +3235,9 @@ class HermesCLI:
 
         def get_prompt():
             if cli_ref._sudo_state:
-                return [('class:sudo-prompt', '🔐 ❯ ')]
+                return [('class:sudo-prompt', '⚿ ❯ ')]
             if cli_ref._approval_state:
-                return [('class:prompt-working', '⚠ ❯ ')]
+                return [('class:prompt-working', '! ❯ ')]
             if cli_ref._clarify_freetext:
                 return [('class:clarify-selected', '✎ ❯ ')]
             if cli_ref._clarify_state:
@@ -3148,9 +3283,12 @@ class HermesCLI:
         # Paste collapsing: detect large pastes and save to temp file
         _paste_counter = [0]
         _prev_text_len = [0]
+        _paste_collapsing = [False]  # re-entry guard: buf.text= fires on_text_changed again
 
         def _on_text_changed(buf):
             """Detect large pastes and collapse them to a file reference."""
+            if _paste_collapsing[0]:
+                return
             text = buf.text
             line_count = text.count('\n')
             chars_added = len(text) - _prev_text_len[0]
@@ -3159,14 +3297,18 @@ class HermesCLI:
             # single newline from Alt+Enter) AND the result has 5+ lines.
             if line_count >= 5 and chars_added > 1 and not text.startswith('/'):
                 _paste_counter[0] += 1
-                # Save to temp file
                 paste_dir = Path(os.path.expanduser("~/.hermes/pastes"))
                 paste_dir.mkdir(parents=True, exist_ok=True)
                 paste_file = paste_dir / f"paste_{_paste_counter[0]}_{datetime.now().strftime('%H%M%S')}.txt"
                 paste_file.write_text(text, encoding="utf-8")
-                # Replace buffer with compact reference
-                buf.text = f"[Pasted text #{_paste_counter[0]}: {line_count + 1} lines → {paste_file}]"
-                buf.cursor_position = len(buf.text)
+                ref = f"[Pasted text #{_paste_counter[0]}: {line_count + 1} lines → {paste_file}]"
+                _paste_collapsing[0] = True
+                try:
+                    buf.text = ref
+                    buf.cursor_position = len(ref)
+                    _prev_text_len[0] = len(ref)
+                finally:
+                    _paste_collapsing[0] = False
 
         input_area.buffer.on_text_changed += _on_text_changed
 
@@ -3242,11 +3384,9 @@ class HermesCLI:
             return []
 
         def get_hint_height():
-            if cli_ref._sudo_state or cli_ref._approval_state or cli_ref._clarify_state:
-                return 1
-            # Keep a 1-line spacer while agent runs so output doesn't push
-            # right up against the top rule of the input area
-            return 1 if cli_ref._agent_running else 0
+            # Constant 1-line spacer prevents the input area from jumping
+            # when agent state changes (was 0↔1 causing visible layout reflow).
+            return 1
 
         spacer = Window(
             content=FormattedTextControl(get_hint_text),
@@ -3265,43 +3405,45 @@ class HermesCLI:
             choices = state.get("choices") or []
             selected = state.get("selected", 0)
 
-            lines = []
-            # Box top border
-            lines.append(('class:clarify-border', '╭─ '))
-            lines.append(('class:clarify-title', 'Hermes needs your input'))
-            lines.append(('class:clarify-border', ' ─────────────────────────────╮\n'))
-            lines.append(('class:clarify-border', '│\n'))
+            title = 'Hermes needs your input'
+            cols = shutil.get_terminal_size().columns
+            box_w = min(max(cols - 2, len(title) + 8), 72)
+            top_fill = '─' * max(0, box_w - len(title) - 5)  # ╭─ [sp] title [sp] fill ╮
+            bot_fill = '─' * (box_w - 2)
 
-            # Question text
-            lines.append(('class:clarify-border', '│  '))
-            lines.append(('class:clarify-question', question))
-            lines.append(('', '\n'))
-            lines.append(('class:clarify-border', '│\n'))
+            frags = []
+            frags.append(('class:clarify-border', '╭─ '))
+            frags.append(('class:clarify-title', title))
+            frags.append(('class:clarify-border', f' {top_fill}╮\n'))
+            frags.append(('class:clarify-border', '│\n'))
+
+            frags.append(('class:clarify-border', '│  '))
+            frags.append(('class:clarify-question', question))
+            frags.append(('', '\n'))
+            frags.append(('class:clarify-border', '│\n'))
 
             if choices:
-                # Multiple-choice mode: show selectable options
                 for i, choice in enumerate(choices):
-                    lines.append(('class:clarify-border', '│  '))
+                    frags.append(('class:clarify-border', '│  '))
                     if i == selected and not cli_ref._clarify_freetext:
-                        lines.append(('class:clarify-selected', f'❯ {choice}'))
+                        frags.append(('class:clarify-selected', f'> {choice}'))
                     else:
-                        lines.append(('class:clarify-choice', f'  {choice}'))
-                    lines.append(('', '\n'))
+                        frags.append(('class:clarify-choice', f'  {choice}'))
+                    frags.append(('', '\n'))
 
-                # "Other" option (5th line, only shown when choices exist)
                 other_idx = len(choices)
-                lines.append(('class:clarify-border', '│  '))
+                frags.append(('class:clarify-border', '│  '))
                 if selected == other_idx and not cli_ref._clarify_freetext:
-                    lines.append(('class:clarify-selected', '❯ Other (type your answer)'))
+                    frags.append(('class:clarify-selected', '> Other (type your answer)'))
                 elif cli_ref._clarify_freetext:
-                    lines.append(('class:clarify-active-other', '❯ Other (type below)'))
+                    frags.append(('class:clarify-active-other', '> Other (type below)'))
                 else:
-                    lines.append(('class:clarify-choice', '  Other (type your answer)'))
-                lines.append(('', '\n'))
+                    frags.append(('class:clarify-choice', '  Other (type your answer)'))
+                frags.append(('', '\n'))
 
-            lines.append(('class:clarify-border', '│\n'))
-            lines.append(('class:clarify-border', '╰──────────────────────────────────────────────────╯\n'))
-            return lines
+            frags.append(('class:clarify-border', '│\n'))
+            frags.append(('class:clarify-border', f'╰{bot_fill}╯\n'))
+            return frags
 
         clarify_widget = ConditionalContainer(
             Window(
@@ -3317,17 +3459,22 @@ class HermesCLI:
             state = cli_ref._sudo_state
             if not state:
                 return []
-            lines = []
-            lines.append(('class:sudo-border', '╭─ '))
-            lines.append(('class:sudo-title', '🔐 Sudo Password Required'))
-            lines.append(('class:sudo-border', ' ──────────────────────────╮\n'))
-            lines.append(('class:sudo-border', '│\n'))
-            lines.append(('class:sudo-border', '│  '))
-            lines.append(('class:sudo-text', 'Enter password below (hidden), or press Enter to skip'))
-            lines.append(('', '\n'))
-            lines.append(('class:sudo-border', '│\n'))
-            lines.append(('class:sudo-border', '╰──────────────────────────────────────────────────╯\n'))
-            return lines
+            title = 'Sudo Password Required'
+            cols = shutil.get_terminal_size().columns
+            box_w = min(max(cols - 2, len(title) + 8), 72)
+            top_fill = '─' * max(0, box_w - len(title) - 5)
+            bot_fill = '─' * (box_w - 2)
+            frags = []
+            frags.append(('class:sudo-border', '╭─ '))
+            frags.append(('class:sudo-title', title))
+            frags.append(('class:sudo-border', f' {top_fill}╮\n'))
+            frags.append(('class:sudo-border', '│\n'))
+            frags.append(('class:sudo-border', '│  '))
+            frags.append(('class:sudo-text', 'Enter password below (hidden), or press Enter to skip'))
+            frags.append(('', '\n'))
+            frags.append(('class:sudo-border', '│\n'))
+            frags.append(('class:sudo-border', f'╰{bot_fill}╯\n'))
+            return frags
 
         sudo_widget = ConditionalContainer(
             Window(
@@ -3356,29 +3503,34 @@ class HermesCLI:
                 "deny": "Deny",
             }
 
-            lines = []
-            lines.append(('class:approval-border', '╭─ '))
-            lines.append(('class:approval-title', '⚠️  Dangerous Command'))
-            lines.append(('class:approval-border', ' ───────────────────────────────╮\n'))
-            lines.append(('class:approval-border', '│\n'))
-            lines.append(('class:approval-border', '│  '))
-            lines.append(('class:approval-desc', description))
-            lines.append(('', '\n'))
-            lines.append(('class:approval-border', '│  '))
-            lines.append(('class:approval-cmd', cmd_display))
-            lines.append(('', '\n'))
-            lines.append(('class:approval-border', '│\n'))
+            title = 'Dangerous Command'
+            cols = shutil.get_terminal_size().columns
+            box_w = min(max(cols - 2, len(title) + 8), 72)
+            top_fill = '─' * max(0, box_w - len(title) - 5)
+            bot_fill = '─' * (box_w - 2)
+            frags = []
+            frags.append(('class:approval-border', '╭─ '))
+            frags.append(('class:approval-title', title))
+            frags.append(('class:approval-border', f' {top_fill}╮\n'))
+            frags.append(('class:approval-border', '│\n'))
+            frags.append(('class:approval-border', '│  '))
+            frags.append(('class:approval-desc', description))
+            frags.append(('', '\n'))
+            frags.append(('class:approval-border', '│  '))
+            frags.append(('class:approval-cmd', cmd_display))
+            frags.append(('', '\n'))
+            frags.append(('class:approval-border', '│\n'))
             for i, choice in enumerate(choices):
-                lines.append(('class:approval-border', '│  '))
+                frags.append(('class:approval-border', '│  '))
                 label = choice_labels.get(choice, choice)
                 if i == selected:
-                    lines.append(('class:approval-selected', f'❯ {label}'))
+                    frags.append(('class:approval-selected', f'> {label}'))
                 else:
-                    lines.append(('class:approval-choice', f'  {label}'))
-                lines.append(('', '\n'))
-            lines.append(('class:approval-border', '│\n'))
-            lines.append(('class:approval-border', '╰──────────────────────────────────────────────────────╯\n'))
-            return lines
+                    frags.append(('class:approval-choice', f'  {label}'))
+                frags.append(('', '\n'))
+            frags.append(('class:approval-border', '│\n'))
+            frags.append(('class:approval-border', f'╰{bot_fill}╯\n'))
+            return frags
 
         approval_widget = ConditionalContainer(
             Window(
@@ -3439,43 +3591,8 @@ class HermesCLI:
             ])
         )
         
-        # Style for the application
-        style = PTStyle.from_dict({
-            'input-area': '#FFF8DC',
-            'placeholder': '#555555 italic',
-            'prompt': '#FFF8DC',
-            'prompt-working': '#888888 italic',
-            'hint': '#555555 italic',
-            # Bronze horizontal rules around the input area
-            'input-rule': '#CD7F32',
-            # Clipboard image attachment badges
-            'image-badge': '#87CEEB bold',
-            'completion-menu': 'bg:#1a1a2e #FFF8DC',
-            'completion-menu.completion': 'bg:#1a1a2e #FFF8DC',
-            'completion-menu.completion.current': 'bg:#333355 #FFD700',
-            'completion-menu.meta.completion': 'bg:#1a1a2e #888888',
-            'completion-menu.meta.completion.current': 'bg:#333355 #FFBF00',
-            # Clarify question panel
-            'clarify-border': '#CD7F32',
-            'clarify-title': '#FFD700 bold',
-            'clarify-question': '#FFF8DC bold',
-            'clarify-choice': '#AAAAAA',
-            'clarify-selected': '#FFD700 bold',
-            'clarify-active-other': '#FFD700 italic',
-            'clarify-countdown': '#CD7F32',
-            # Sudo password panel
-            'sudo-prompt': '#FF6B6B bold',
-            'sudo-border': '#CD7F32',
-            'sudo-title': '#FF6B6B bold',
-            'sudo-text': '#FFF8DC',
-            # Dangerous command approval panel
-            'approval-border': '#CD7F32',
-            'approval-title': '#FF8C00 bold',
-            'approval-desc': '#FFF8DC bold',
-            'approval-cmd': '#AAAAAA italic',
-            'approval-choice': '#AAAAAA',
-            'approval-selected': '#FFD700 bold',
-        })
+        # Style for the application — loaded from active skin theme
+        style = PTStyle.from_dict(_SKIN_THEMES.get(self._current_skin, _SKIN_THEMES["default"]))
         
         # Create the application
         app = Application(
@@ -3564,13 +3681,18 @@ class HermesCLI:
         # Register atexit cleanup so resources are freed even on unexpected exit
         atexit.register(_run_cleanup)
         
-        # Run the application with patch_stdout for proper output handling
+        # Run the application with patch_stdout for proper output handling.
+        # Set HERMES_IN_TUI so KawaiiSpinner suppresses \r-based animation
+        # (patch_stdout doesn't support carriage-return overwrite; it would
+        # emit a new rendered line per tick, flooding the output area).
+        os.environ["HERMES_IN_TUI"] = "1"
         try:
             with patch_stdout():
                 app.run()
         except (EOFError, KeyboardInterrupt):
             pass
         finally:
+            os.environ.pop("HERMES_IN_TUI", None)
             self._should_exit = True
             # Flush memories before exit (only for substantial conversations)
             if self.agent and self.conversation_history:
