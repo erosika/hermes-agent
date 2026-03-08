@@ -628,6 +628,150 @@ def cmd_uninstall(args):
     run_uninstall(args)
 
 
+def _find_venv():
+    """Find the virtual environment directory (.venv or venv)."""
+    for name in (".venv", "venv"):
+        candidate = PROJECT_ROOT / name
+        if candidate.exists():
+            return candidate
+    return PROJECT_ROOT / "venv"  # fallback
+
+
+def _get_install_extras():
+    """Detect which optional extras are currently installed and return pip install spec."""
+    extras = []
+    # Check for installed optional packages and map to extras
+    extra_markers = {
+        "honcho": "honcho_ai",
+        "mcp": "mcp",
+        "messaging": "telegram",
+        "slack": "slack_bolt",
+        "cron": "croniter",
+        "cli": "simple_term_menu",
+        "tts-premium": "elevenlabs",
+        "pty": "ptyprocess",
+        "homeassistant": "aiohttp",
+    }
+    for extra_name, pkg in extra_markers.items():
+        try:
+            __import__(pkg)
+            extras.append(extra_name)
+        except ImportError:
+            pass
+    # Also check ~/.honcho/config.json — if it exists with enabled=true, ensure honcho extra
+    honcho_cfg = Path.home() / ".honcho" / "config.json"
+    if honcho_cfg.exists() and "honcho" not in extras:
+        try:
+            import json
+            cfg = json.loads(honcho_cfg.read_text())
+            if cfg.get("enabled"):
+                extras.append("honcho")
+        except Exception:
+            pass
+    if extras:
+        return f".[{','.join(extras)}]"
+    return "."
+
+
+def _update_via_zip(args):
+    """Update Hermes Agent by downloading a ZIP archive.
+    
+    Used on Windows when git file I/O is broken (antivirus, NTFS filter 
+    drivers causing 'Invalid argument' errors on file creation).
+    """
+    import shutil
+    import tempfile
+    import zipfile
+    from urllib.request import urlretrieve
+    
+    branch = "main"
+    zip_url = f"https://github.com/NousResearch/hermes-agent/archive/refs/heads/{branch}.zip"
+    
+    print("→ Downloading latest version...")
+    try:
+        tmp_dir = tempfile.mkdtemp(prefix="hermes-update-")
+        zip_path = os.path.join(tmp_dir, f"hermes-agent-{branch}.zip")
+        urlretrieve(zip_url, zip_path)
+        
+        print("→ Extracting...")
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(tmp_dir)
+        
+        # GitHub ZIPs extract to hermes-agent-<branch>/
+        extracted = os.path.join(tmp_dir, f"hermes-agent-{branch}")
+        if not os.path.isdir(extracted):
+            # Try to find it
+            for d in os.listdir(tmp_dir):
+                candidate = os.path.join(tmp_dir, d)
+                if os.path.isdir(candidate) and d != "__MACOSX":
+                    extracted = candidate
+                    break
+        
+        # Copy updated files over existing installation, preserving venv/node_modules/.git
+        preserve = {'venv', 'node_modules', '.git', '__pycache__', '.env'}
+        update_count = 0
+        for item in os.listdir(extracted):
+            if item in preserve:
+                continue
+            src = os.path.join(extracted, item)
+            dst = os.path.join(str(PROJECT_ROOT), item)
+            if os.path.isdir(src):
+                if os.path.exists(dst):
+                    shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+            update_count += 1
+        
+        print(f"✓ Updated {update_count} items from ZIP")
+        
+        # Cleanup
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        
+    except Exception as e:
+        print(f"✗ ZIP update failed: {e}")
+        sys.exit(1)
+    
+    # Reinstall Python dependencies
+    print("→ Updating Python dependencies...")
+    import subprocess
+    venv_dir = _find_venv()
+    install_spec = _get_install_extras()
+    print(f"  Installing: {install_spec}")
+    uv_bin = shutil.which("uv")
+    if uv_bin:
+        subprocess.run(
+            [uv_bin, "pip", "install", "-e", install_spec, "--quiet"],
+            cwd=PROJECT_ROOT, check=True,
+            env={**os.environ, "VIRTUAL_ENV": str(venv_dir)}
+        )
+    else:
+        venv_pip = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
+        if venv_pip.exists():
+            subprocess.run([str(venv_pip), "install", "-e", install_spec, "--quiet"], cwd=PROJECT_ROOT, check=True)
+    
+    # Sync skills
+    try:
+        from tools.skills_sync import sync_skills
+        print("→ Syncing bundled skills...")
+        result = sync_skills(quiet=True)
+        if result["copied"]:
+            print(f"  + {len(result['copied'])} new: {', '.join(result['copied'])}")
+        if result.get("updated"):
+            print(f"  ↑ {len(result['updated'])} updated: {', '.join(result['updated'])}")
+        if result.get("user_modified"):
+            print(f"  ~ {len(result['user_modified'])} user-modified (kept)")
+        if result.get("cleaned"):
+            print(f"  − {len(result['cleaned'])} removed from manifest")
+        if not result["copied"] and not result.get("updated"):
+            print("  ✓ Skills are up to date")
+    except Exception:
+        pass
+    
+    print()
+    print("✓ Update complete!")
+
+
 def cmd_update(args):
     """Update Hermes Agent to the latest version."""
     import subprocess
@@ -678,19 +822,22 @@ def cmd_update(args):
         
         # Reinstall Python dependencies (prefer uv for speed, fall back to pip)
         print("→ Updating Python dependencies...")
+        venv_dir = _find_venv()
+        install_spec = _get_install_extras()
+        print(f"  Installing: {install_spec}")
         uv_bin = shutil.which("uv")
         if uv_bin:
             subprocess.run(
-                [uv_bin, "pip", "install", "-e", ".", "--quiet"],
+                [uv_bin, "pip", "install", "-e", install_spec, "--quiet"],
                 cwd=PROJECT_ROOT, check=True,
-                env={**os.environ, "VIRTUAL_ENV": str(PROJECT_ROOT / "venv")}
+                env={**os.environ, "VIRTUAL_ENV": str(venv_dir)}
             )
         else:
-            venv_pip = PROJECT_ROOT / "venv" / "bin" / "pip"
+            venv_pip = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
             if venv_pip.exists():
-                subprocess.run([str(venv_pip), "install", "-e", ".", "--quiet"], cwd=PROJECT_ROOT, check=True)
+                subprocess.run([str(venv_pip), "install", "-e", install_spec, "--quiet"], cwd=PROJECT_ROOT, check=True)
             else:
-                subprocess.run(["pip", "install", "-e", ".", "--quiet"], cwd=PROJECT_ROOT, check=True)
+                subprocess.run(["pip", "install", "-e", install_spec, "--quiet"], cwd=PROJECT_ROOT, check=True)
         
         # Check for Node.js deps
         if (PROJECT_ROOT / "package.json").exists():

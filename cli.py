@@ -470,6 +470,107 @@ def _ansi_dim_hex(color: str) -> str:
     """Return a dimmed truecolor ANSI foreground escape for a hex color."""
     return f"\033[2m{_ansi_fg_hex(color)}"
 
+
+# ---------------------------------------------------------------------------
+# Skin themes — mapped to prompt_toolkit style class names.
+# Switch at runtime with /skin <name>.
+# ---------------------------------------------------------------------------
+_SKIN_THEMES: Dict[str, Dict[str, str]] = {
+    "default": {
+        "input-area": "#FFF8DC",
+        "placeholder": "#555555 italic",
+        "prompt": "#FFF8DC",
+        "prompt-working": "#888888 italic",
+        "hint": "#555555 italic",
+        "input-rule": "#CD7F32",
+        "image-badge": "#87CEEB bold",
+        "completion-menu": "bg:#1a1a2e #FFF8DC",
+        "completion-menu.completion": "bg:#1a1a2e #FFF8DC",
+        "completion-menu.completion.current": "bg:#333355 #FFD700",
+        "completion-menu.meta.completion": "bg:#1a1a2e #888888",
+        "completion-menu.meta.completion.current": "bg:#333355 #FFBF00",
+        "clarify-border": "#CD7F32",
+        "clarify-title": "#FFD700 bold",
+        "clarify-question": "#FFF8DC bold",
+        "clarify-choice": "#AAAAAA",
+        "clarify-selected": "#FFD700 bold",
+        "clarify-active-other": "#FFD700 italic",
+        "clarify-countdown": "#CD7F32",
+        "sudo-prompt": "#FF6B6B bold",
+        "sudo-border": "#CD7F32",
+        "sudo-title": "#FF6B6B bold",
+        "sudo-text": "#FFF8DC",
+        "approval-border": "#CD7F32",
+        "approval-title": "#FF8C00 bold",
+        "approval-desc": "#FFF8DC bold",
+        "approval-cmd": "#AAAAAA italic",
+        "approval-choice": "#AAAAAA",
+        "approval-selected": "#FFD700 bold",
+    },
+    "mono": {
+        "input-area": "#e6edf3",
+        "placeholder": "#444444 italic",
+        "prompt": "#c9d1d9",
+        "prompt-working": "#666666 italic",
+        "hint": "#444444 italic",
+        "input-rule": "#444444",
+        "image-badge": "#888888 bold",
+        "completion-menu": "bg:#111111 #e6edf3",
+        "completion-menu.completion": "bg:#111111 #e6edf3",
+        "completion-menu.completion.current": "bg:#333333 #ffffff",
+        "completion-menu.meta.completion": "bg:#111111 #666666",
+        "completion-menu.meta.completion.current": "bg:#333333 #aaaaaa",
+        "clarify-border": "#555555",
+        "clarify-title": "#e6edf3 bold",
+        "clarify-question": "#e6edf3",
+        "clarify-choice": "#888888",
+        "clarify-selected": "#ffffff bold",
+        "clarify-active-other": "#aaaaaa italic",
+        "clarify-countdown": "#666666",
+        "sudo-prompt": "#e6edf3 bold",
+        "sudo-border": "#555555",
+        "sudo-title": "#e6edf3 bold",
+        "sudo-text": "#e6edf3",
+        "approval-border": "#555555",
+        "approval-title": "#aaaaaa bold",
+        "approval-desc": "#e6edf3 bold",
+        "approval-cmd": "#888888 italic",
+        "approval-choice": "#888888",
+        "approval-selected": "#ffffff bold",
+    },
+    "slate": {
+        "input-area": "#c9d1d9",
+        "placeholder": "#4b5563 italic",
+        "prompt": "#7eb8f6",
+        "prompt-working": "#4b5563 italic",
+        "hint": "#4b5563 italic",
+        "input-rule": "#4169e1",
+        "image-badge": "#8EA8FF bold",
+        "completion-menu": "bg:#0b0e14 #c9d1d9",
+        "completion-menu.completion": "bg:#0b0e14 #c9d1d9",
+        "completion-menu.completion.current": "bg:#1a2233 #7eb8f6",
+        "completion-menu.meta.completion": "bg:#0b0e14 #4b5563",
+        "completion-menu.meta.completion.current": "bg:#1a2233 #7eb8f6",
+        "clarify-border": "#4169e1",
+        "clarify-title": "#7eb8f6 bold",
+        "clarify-question": "#c9d1d9",
+        "clarify-choice": "#4b5563",
+        "clarify-selected": "#7eb8f6 bold",
+        "clarify-active-other": "#8EA8FF italic",
+        "clarify-countdown": "#4169e1",
+        "sudo-prompt": "#63D0A6 bold",
+        "sudo-border": "#4169e1",
+        "sudo-title": "#63D0A6 bold",
+        "sudo-text": "#c9d1d9",
+        "approval-border": "#4169e1",
+        "approval-title": "#F7A072 bold",
+        "approval-desc": "#c9d1d9 bold",
+        "approval-cmd": "#4b5563 italic",
+        "approval-choice": "#4b5563",
+        "approval-selected": "#7eb8f6 bold",
+    },
+}
+
 def _cprint(text: str):
     """Print ANSI-colored text through prompt_toolkit's native renderer.
 
@@ -963,6 +1064,10 @@ class HermesCLI:
         
         # History file for persistent input recall across sessions
         self._history_file = Path.home() / ".hermes_history"
+        self._last_invalidate: float = 0.0  # throttle UI repaints
+        self._current_skin: str = CLI_CONFIG.get("display", {}).get("skin", "default")
+        if self._current_skin not in _SKIN_THEMES:
+            self._current_skin = "default"
 
     def _sync_skin_env(self):
         """Expose display settings to modules that only see environment state."""
@@ -2250,12 +2355,266 @@ class HermesCLI:
             self._handle_skills_command(cmd_original)
         elif cmd_lower == "/platforms" or cmd_lower == "/gateway":
             self._show_gateway_status()
+        elif cmd_lower == "/verbose":
+            self._toggle_verbose()
+        elif cmd_lower == "/compress":
+            self._manual_compress()
+        elif cmd_lower == "/usage":
+            self._show_usage()
+        elif cmd_lower.startswith("/insights"):
+            self._show_insights(cmd_original)
+        elif cmd_lower == "/paste":
+            self._handle_paste_command()
+        elif cmd_lower == "/reload-mcp":
+            self._reload_mcp()
         else:
             self.console.print(f"[bold red]Unknown command: {cmd_lower}[/]")
             self.console.print(f"[dim {ARES_ASH}]Type /help for available commands[/]")
         
         return True
     
+    def _toggle_verbose(self):
+        """Cycle tool progress mode: off → new → all → verbose → off."""
+        cycle = ["off", "new", "all", "verbose"]
+        try:
+            idx = cycle.index(self.tool_progress_mode)
+        except ValueError:
+            idx = 2  # default to "all"
+        self.tool_progress_mode = cycle[(idx + 1) % len(cycle)]
+        self.verbose = self.tool_progress_mode == "verbose"
+
+        if self.agent:
+            self.agent.verbose_logging = self.verbose
+            self.agent.quiet_mode = not self.verbose
+
+        labels = {
+            "off": "[dim]Tool progress: OFF[/] — silent mode, just the final response.",
+            "new": "[yellow]Tool progress: NEW[/] — show each new tool (skip repeats).",
+            "all": "[green]Tool progress: ALL[/] — show every tool call.",
+            "verbose": "[bold green]Tool progress: VERBOSE[/] — full args, results, and debug logs.",
+        }
+        self.console.print(labels.get(self.tool_progress_mode, ""))
+
+    def _manual_compress(self):
+        """Manually trigger context compression on the current conversation."""
+        if not self.conversation_history or len(self.conversation_history) < 4:
+            print("(._.) Not enough conversation to compress (need at least 4 messages).")
+            return
+
+        if not self.agent:
+            print("(._.) No active agent -- send a message first.")
+            return
+
+        if not self.agent.compression_enabled:
+            print("(._.) Compression is disabled in config.")
+            return
+
+        original_count = len(self.conversation_history)
+        try:
+            from agent.model_metadata import estimate_messages_tokens_rough
+            approx_tokens = estimate_messages_tokens_rough(self.conversation_history)
+            print(f"🗜️  Compressing {original_count} messages (~{approx_tokens:,} tokens)...")
+
+            compressed, new_system = self.agent._compress_context(
+                self.conversation_history,
+                self.agent._cached_system_prompt or "",
+                approx_tokens=approx_tokens,
+            )
+            self.conversation_history = compressed
+            new_count = len(self.conversation_history)
+            new_tokens = estimate_messages_tokens_rough(self.conversation_history)
+            print(
+                f"  ✅ Compressed: {original_count} → {new_count} messages "
+                f"(~{approx_tokens:,} → ~{new_tokens:,} tokens)"
+            )
+        except Exception as e:
+            print(f"  ❌ Compression failed: {e}")
+
+    def _show_usage(self):
+        """Show cumulative token usage for the current session."""
+        if not self.agent:
+            print("(._.) No active agent -- send a message first.")
+            return
+
+        agent = self.agent
+        prompt = agent.session_prompt_tokens
+        completion = agent.session_completion_tokens
+        total = agent.session_total_tokens
+        calls = agent.session_api_calls
+
+        if calls == 0:
+            print("(._.) No API calls made yet in this session.")
+            return
+
+        # Current context window state
+        compressor = agent.context_compressor
+        last_prompt = compressor.last_prompt_tokens
+        ctx_len = compressor.context_length
+        pct = (last_prompt / ctx_len * 100) if ctx_len else 0
+        compressions = compressor.compression_count
+
+        msg_count = len(self.conversation_history)
+
+        print(f"  📊 Session Token Usage")
+        print(f"  {'─' * 40}")
+        print(f"  Prompt tokens (input):     {prompt:>10,}")
+        print(f"  Completion tokens (output): {completion:>9,}")
+        print(f"  Total tokens:              {total:>10,}")
+        print(f"  API calls:                 {calls:>10,}")
+        print(f"  {'─' * 40}")
+        print(f"  Current context:  {last_prompt:,} / {ctx_len:,} ({pct:.0f}%)")
+        print(f"  Messages:         {msg_count}")
+        print(f"  Compressions:     {compressions}")
+
+        if self.verbose:
+            logging.getLogger().setLevel(logging.DEBUG)
+            for noisy in ('openai', 'openai._base_client', 'httpx', 'httpcore', 'asyncio', 'hpack', 'grpc', 'modal'):
+                logging.getLogger(noisy).setLevel(logging.WARNING)
+        else:
+            logging.getLogger().setLevel(logging.INFO)
+            for quiet_logger in ('tools', 'minisweagent', 'run_agent', 'trajectory_compressor', 'cron', 'hermes_cli'):
+                logging.getLogger(quiet_logger).setLevel(logging.ERROR)
+
+    def _show_insights(self, command: str = "/insights"):
+        """Show usage insights and analytics from session history."""
+        # Parse optional --days flag
+        parts = command.split()
+        days = 30
+        source = None
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--days" and i + 1 < len(parts):
+                try:
+                    days = int(parts[i + 1])
+                except ValueError:
+                    print(f"  Invalid --days value: {parts[i + 1]}")
+                    return
+                i += 2
+            elif parts[i] == "--source" and i + 1 < len(parts):
+                source = parts[i + 1]
+                i += 2
+            else:
+                i += 1
+
+        try:
+            from hermes_state import SessionDB
+            from agent.insights import InsightsEngine
+
+            db = SessionDB()
+            engine = InsightsEngine(db)
+            report = engine.generate(days=days, source=source)
+            print(engine.format_terminal(report))
+            db.close()
+        except Exception as e:
+            print(f"  Error generating insights: {e}")
+
+    def _reload_mcp(self):
+        """Reload MCP servers: disconnect all, re-read config.yaml, reconnect.
+
+        After reconnecting, refreshes the agent's tool list so the model
+        sees the updated tools on the next turn.
+        """
+        try:
+            from tools.mcp_tool import shutdown_mcp_servers, discover_mcp_tools, _load_mcp_config, _servers, _lock
+
+            # Capture old server names
+            with _lock:
+                old_servers = set(_servers.keys())
+
+            print("🔄 Reloading MCP servers...")
+
+            # Shutdown existing connections
+            shutdown_mcp_servers()
+
+            # Reconnect (reads config.yaml fresh)
+            new_tools = discover_mcp_tools()
+
+            # Compute what changed
+            with _lock:
+                connected_servers = set(_servers.keys())
+
+            added = connected_servers - old_servers
+            removed = old_servers - connected_servers
+            reconnected = connected_servers & old_servers
+
+            if reconnected:
+                print(f"  ♻️  Reconnected: {', '.join(sorted(reconnected))}")
+            if added:
+                print(f"  ➕ Added: {', '.join(sorted(added))}")
+            if removed:
+                print(f"  ➖ Removed: {', '.join(sorted(removed))}")
+            if not connected_servers:
+                print("  No MCP servers connected.")
+            else:
+                print(f"  🔧 {len(new_tools)} tool(s) available from {len(connected_servers)} server(s)")
+
+            # Refresh the agent's tool list so the model can call new tools
+            if self.agent is not None:
+                from model_tools import get_tool_definitions
+                self.agent.tools = get_tool_definitions(
+                    enabled_toolsets=self.agent.enabled_toolsets
+                    if hasattr(self.agent, "enabled_toolsets") else None,
+                    quiet_mode=True,
+                )
+                self.agent.valid_tool_names = {
+                    tool["function"]["name"] for tool in self.agent.tools
+                } if self.agent.tools else set()
+
+            # Inject a message at the END of conversation history so the
+            # model knows tools changed.  Appended after all existing
+            # messages to preserve prompt-cache for the prefix.
+            change_parts = []
+            if added:
+                change_parts.append(f"Added servers: {', '.join(sorted(added))}")
+            if removed:
+                change_parts.append(f"Removed servers: {', '.join(sorted(removed))}")
+            if reconnected:
+                change_parts.append(f"Reconnected servers: {', '.join(sorted(reconnected))}")
+            tool_summary = f"{len(new_tools)} MCP tool(s) now available" if new_tools else "No MCP tools available"
+            change_detail = ". ".join(change_parts) + ". " if change_parts else ""
+            self.conversation_history.append({
+                "role": "user",
+                "content": f"[SYSTEM: MCP servers have been reloaded. {change_detail}{tool_summary}. The tool list for this conversation has been updated accordingly.]",
+            })
+
+            # Persist session immediately so the session log reflects the
+            # updated tools list (self.agent.tools was refreshed above).
+            if self.agent is not None:
+                try:
+                    self.agent._persist_session(
+                        self.conversation_history,
+                        self.conversation_history,
+                    )
+                except Exception:
+                    pass  # Best-effort
+
+            print(f"  ✅ Agent updated — {len(self.agent.tools if self.agent else [])} tool(s) available")
+
+        except Exception as e:
+            print(f"  MCP reload failed: {e}")
+
+    def _handle_skin_command(self, cmd: str) -> None:
+        """Handle /skin [name] — switch the terminal color theme at runtime."""
+        parts = cmd.strip().split(maxsplit=1)
+        available = list(_SKIN_THEMES.keys())
+        if len(parts) < 2:
+            print(f"Current skin: {self._current_skin}")
+            print(f"Available: {', '.join(available)}")
+            print("Usage: /skin <name>")
+            return
+        name = parts[1].strip().lower()
+        if name not in _SKIN_THEMES:
+            print(f"Unknown skin: {name}  (available: {', '.join(available)})")
+            return
+        self._current_skin = name
+        if self._app:
+            self._app.style = PTStyle.from_dict(_SKIN_THEMES[name])
+            self._app.invalidate()
+        if save_config_value("display.skin", name):
+            print(f"Skin set to: {name} (saved)")
+        else:
+            print(f"Skin set to: {name}")
+
     def _clarify_callback(self, question, choices):
         """
         Platform callback for the clarify tool. Called from the agent thread.
@@ -2851,9 +3210,9 @@ class HermesCLI:
 
         def get_prompt():
             if cli_ref._sudo_state:
-                return [('class:sudo-prompt', '🔐 ❯ ')]
+                return [('class:sudo-prompt', '⚿ ❯ ')]
             if cli_ref._approval_state:
-                return [('class:prompt-working', '⚠ ❯ ')]
+                return [('class:prompt-working', '! ❯ ')]
             if cli_ref._clarify_freetext:
                 return [('class:clarify-selected', '✎ ❯ ')]
             if cli_ref._clarify_state:
@@ -2904,9 +3263,13 @@ class HermesCLI:
 
         # Paste collapsing: detect large pastes and save to temp file
         _paste_counter = [0]
+        _prev_text_len = [0]
+        _paste_collapsing = [False]  # re-entry guard: buf.text= fires on_text_changed again
 
         def _on_text_changed(buf):
             """Detect large pastes and collapse them to a file reference."""
+            if _paste_collapsing[0]:
+                return
             text = buf.text
             if text:
                 cli_ref._freeze_managed_banner()
@@ -2914,14 +3277,18 @@ class HermesCLI:
             # Heuristic: if text jumps to 5+ lines in one change, it's a paste
             if line_count >= 5 and not text.startswith('/'):
                 _paste_counter[0] += 1
-                # Save to temp file
                 paste_dir = Path(os.path.expanduser("~/.hermes/pastes"))
                 paste_dir.mkdir(parents=True, exist_ok=True)
                 paste_file = paste_dir / f"paste_{_paste_counter[0]}_{datetime.now().strftime('%H%M%S')}.txt"
                 paste_file.write_text(text, encoding="utf-8")
-                # Replace buffer with compact reference
-                buf.text = f"[Pasted text #{_paste_counter[0]}: {line_count + 1} lines → {paste_file}]"
-                buf.cursor_position = len(buf.text)
+                ref = f"[Pasted text #{_paste_counter[0]}: {line_count + 1} lines → {paste_file}]"
+                _paste_collapsing[0] = True
+                try:
+                    buf.text = ref
+                    buf.cursor_position = len(ref)
+                    _prev_text_len[0] = len(ref)
+                finally:
+                    _paste_collapsing[0] = False
 
         input_area.buffer.on_text_changed += _on_text_changed
 
@@ -3044,48 +3411,49 @@ class HermesCLI:
             choices = state.get("choices") or []
             selected = state.get("selected", 0)
 
-            lines = []
-            # Box top border
-            lines.append(('class:clarify-border', '╭─ '))
-            clarify_title = (
+            title = (
                 f"{get_mod_assistant_name()} needs your input"
                 if cli_ref._ares_skin_active()
                 else "Hermes needs your input"
             )
-            lines.append(('class:clarify-title', clarify_title))
-            lines.append(('class:clarify-border', ' ─────────────────────────────╮\n'))
-            lines.append(('class:clarify-border', '│\n'))
+            cols = shutil.get_terminal_size().columns
+            box_w = min(max(cols - 2, len(title) + 8), 72)
+            top_fill = '─' * max(0, box_w - len(title) - 5)  # ╭─ [sp] title [sp] fill ╮
+            bot_fill = '─' * (box_w - 2)
 
-            # Question text
-            lines.append(('class:clarify-border', '│  '))
-            lines.append(('class:clarify-question', question))
-            lines.append(('', '\n'))
-            lines.append(('class:clarify-border', '│\n'))
+            frags = []
+            frags.append(('class:clarify-border', '╭─ '))
+            frags.append(('class:clarify-title', title))
+            frags.append(('class:clarify-border', f' {top_fill}╮\n'))
+            frags.append(('class:clarify-border', '│\n'))
+
+            frags.append(('class:clarify-border', '│  '))
+            frags.append(('class:clarify-question', question))
+            frags.append(('', '\n'))
+            frags.append(('class:clarify-border', '│\n'))
 
             if choices:
-                # Multiple-choice mode: show selectable options
                 for i, choice in enumerate(choices):
-                    lines.append(('class:clarify-border', '│  '))
+                    frags.append(('class:clarify-border', '│  '))
                     if i == selected and not cli_ref._clarify_freetext:
-                        lines.append(('class:clarify-selected', f'❯ {choice}'))
+                        frags.append(('class:clarify-selected', f'> {choice}'))
                     else:
-                        lines.append(('class:clarify-choice', f'  {choice}'))
-                    lines.append(('', '\n'))
+                        frags.append(('class:clarify-choice', f'  {choice}'))
+                    frags.append(('', '\n'))
 
-                # "Other" option (5th line, only shown when choices exist)
                 other_idx = len(choices)
-                lines.append(('class:clarify-border', '│  '))
+                frags.append(('class:clarify-border', '│  '))
                 if selected == other_idx and not cli_ref._clarify_freetext:
-                    lines.append(('class:clarify-selected', '❯ Other (type your answer)'))
+                    frags.append(('class:clarify-selected', '> Other (type your answer)'))
                 elif cli_ref._clarify_freetext:
-                    lines.append(('class:clarify-active-other', '❯ Other (type below)'))
+                    frags.append(('class:clarify-active-other', '> Other (type below)'))
                 else:
-                    lines.append(('class:clarify-choice', '  Other (type your answer)'))
-                lines.append(('', '\n'))
+                    frags.append(('class:clarify-choice', '  Other (type your answer)'))
+                frags.append(('', '\n'))
 
-            lines.append(('class:clarify-border', '│\n'))
-            lines.append(('class:clarify-border', '╰──────────────────────────────────────────────────╯\n'))
-            return lines
+            frags.append(('class:clarify-border', '│\n'))
+            frags.append(('class:clarify-border', f'╰{bot_fill}╯\n'))
+            return frags
 
         clarify_widget = ConditionalContainer(
             Window(
@@ -3101,17 +3469,22 @@ class HermesCLI:
             state = cli_ref._sudo_state
             if not state:
                 return []
-            lines = []
-            lines.append(('class:sudo-border', '╭─ '))
-            lines.append(('class:sudo-title', '🔐 Sudo Password Required'))
-            lines.append(('class:sudo-border', ' ──────────────────────────╮\n'))
-            lines.append(('class:sudo-border', '│\n'))
-            lines.append(('class:sudo-border', '│  '))
-            lines.append(('class:sudo-text', 'Enter password below (hidden), or press Enter to skip'))
-            lines.append(('', '\n'))
-            lines.append(('class:sudo-border', '│\n'))
-            lines.append(('class:sudo-border', '╰──────────────────────────────────────────────────╯\n'))
-            return lines
+            title = 'Sudo Password Required'
+            cols = shutil.get_terminal_size().columns
+            box_w = min(max(cols - 2, len(title) + 8), 72)
+            top_fill = '─' * max(0, box_w - len(title) - 5)
+            bot_fill = '─' * (box_w - 2)
+            frags = []
+            frags.append(('class:sudo-border', '╭─ '))
+            frags.append(('class:sudo-title', title))
+            frags.append(('class:sudo-border', f' {top_fill}╮\n'))
+            frags.append(('class:sudo-border', '│\n'))
+            frags.append(('class:sudo-border', '│  '))
+            frags.append(('class:sudo-text', 'Enter password below (hidden), or press Enter to skip'))
+            frags.append(('', '\n'))
+            frags.append(('class:sudo-border', '│\n'))
+            frags.append(('class:sudo-border', f'╰{bot_fill}╯\n'))
+            return frags
 
         sudo_widget = ConditionalContainer(
             Window(
@@ -3140,29 +3513,34 @@ class HermesCLI:
                 "deny": "Deny",
             }
 
-            lines = []
-            lines.append(('class:approval-border', '╭─ '))
-            lines.append(('class:approval-title', '⚠️  Dangerous Command'))
-            lines.append(('class:approval-border', ' ───────────────────────────────╮\n'))
-            lines.append(('class:approval-border', '│\n'))
-            lines.append(('class:approval-border', '│  '))
-            lines.append(('class:approval-desc', description))
-            lines.append(('', '\n'))
-            lines.append(('class:approval-border', '│  '))
-            lines.append(('class:approval-cmd', cmd_display))
-            lines.append(('', '\n'))
-            lines.append(('class:approval-border', '│\n'))
+            title = 'Dangerous Command'
+            cols = shutil.get_terminal_size().columns
+            box_w = min(max(cols - 2, len(title) + 8), 72)
+            top_fill = '─' * max(0, box_w - len(title) - 5)
+            bot_fill = '─' * (box_w - 2)
+            frags = []
+            frags.append(('class:approval-border', '╭─ '))
+            frags.append(('class:approval-title', title))
+            frags.append(('class:approval-border', f' {top_fill}╮\n'))
+            frags.append(('class:approval-border', '│\n'))
+            frags.append(('class:approval-border', '│  '))
+            frags.append(('class:approval-desc', description))
+            frags.append(('', '\n'))
+            frags.append(('class:approval-border', '│  '))
+            frags.append(('class:approval-cmd', cmd_display))
+            frags.append(('', '\n'))
+            frags.append(('class:approval-border', '│\n'))
             for i, choice in enumerate(choices):
-                lines.append(('class:approval-border', '│  '))
+                frags.append(('class:approval-border', '│  '))
                 label = choice_labels.get(choice, choice)
                 if i == selected:
-                    lines.append(('class:approval-selected', f'❯ {label}'))
+                    frags.append(('class:approval-selected', f'> {label}'))
                 else:
-                    lines.append(('class:approval-choice', f'  {label}'))
-                lines.append(('', '\n'))
-            lines.append(('class:approval-border', '│\n'))
-            lines.append(('class:approval-border', '╰──────────────────────────────────────────────────────╯\n'))
-            return lines
+                    frags.append(('class:approval-choice', f'  {label}'))
+                frags.append(('', '\n'))
+            frags.append(('class:approval-border', '│\n'))
+            frags.append(('class:approval-border', f'╰{bot_fill}╯\n'))
+            return frags
 
         approval_widget = ConditionalContainer(
             Window(
@@ -3360,13 +3738,18 @@ class HermesCLI:
         # Register atexit cleanup so resources are freed even on unexpected exit
         atexit.register(_run_cleanup)
         
-        # Run the application with patch_stdout for proper output handling
+        # Run the application with patch_stdout for proper output handling.
+        # Set HERMES_IN_TUI so KawaiiSpinner suppresses \r-based animation
+        # (patch_stdout doesn't support carriage-return overwrite; it would
+        # emit a new rendered line per tick, flooding the output area).
+        os.environ["HERMES_IN_TUI"] = "1"
         try:
             with patch_stdout():
                 app.run()
         except (EOFError, KeyboardInterrupt):
             pass
         finally:
+            os.environ.pop("HERMES_IN_TUI", None)
             self._should_exit = True
             # Flush memories before exit (only for substantial conversations)
             if self.agent and self.conversation_history:
