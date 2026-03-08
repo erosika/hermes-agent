@@ -572,6 +572,38 @@ _SKIN_THEMES: Dict[str, Dict[str, str]] = {
         "approval-choice": "#4b5563",
         "approval-selected": "#7eb8f6 bold",
     },
+    "pink": {
+        "input-area": "#FFB7C5",
+        "placeholder": "#D4A0A0 italic",
+        "prompt": "#FF69B4",
+        "prompt-working": "#E8A0BF italic",
+        "hint": "#D4A0A0 italic",
+        "spinner": "#FF69B4",
+        "input-rule": "#5C3050",
+        "image-badge": "#FF1493 bold",
+        "completion-menu": "bg:#3D2030 #FFB7C5",
+        "completion-menu.completion": "bg:#3D2030 #FFB7C5",
+        "completion-menu.completion.current": "bg:#FF69B4 #2D1B2E",
+        "completion-menu.meta.completion": "bg:#3D2030 #D4A0A0",
+        "completion-menu.meta.completion.current": "bg:#FF69B4 #2D1B2E",
+        "clarify-border": "#FF69B4",
+        "clarify-title": "#FF1493 bold",
+        "clarify-question": "#FFB7C5 bold",
+        "clarify-choice": "#E8A0BF",
+        "clarify-selected": "#FF69B4 bold",
+        "clarify-active-other": "#FFB7C5 italic",
+        "clarify-countdown": "#D4A0A0",
+        "sudo-prompt": "#FF1493 bold",
+        "sudo-border": "#FF69B4",
+        "sudo-title": "#FF1493 bold",
+        "sudo-text": "#FFB7C5",
+        "approval-border": "#FF69B4",
+        "approval-title": "#FF1493 bold",
+        "approval-desc": "#FFB7C5 bold",
+        "approval-cmd": "#E8A0BF italic",
+        "approval-choice": "#E8A0BF",
+        "approval-selected": "#FF69B4 bold",
+    },
 }
 
 def _cprint(text: str):
@@ -2636,52 +2668,91 @@ class HermesCLI:
                 if not description:
                     print("Usage: /skin:create <description>  e.g. /skin:create sheikah blue with electric pink accents")
                     return
-                if hasattr(self, '_pending_input'):
-                    self._pending_input.put(
-                        f"Create a new Hermes terminal skin. Description: {description}\n\n"
-                        f"The skin is a Python dict entry in `_SKIN_THEMES` inside "
-                        f"`/Users/eribarrett/Documents/coding/hermes-agent/cli.py`.\n\n"
-                        f"Steps:\n"
-                        f"1. Choose a short slug name (e.g. 'nightsea', 'sakura', 'void').\n"
-                        f"2. Design hex colors matching the description for all 29 keys below.\n"
-                        f"3. Use the patch tool to insert the new dict entry into `_SKIN_THEMES` "
-                        f"right before the closing `}}` of the dict (after the 'slate' entry).\n"
-                        f"4. Call: save_config_value('display.skin', '<slug>') to activate it.\n\n"
-                        f"Required keys (copy this template and fill in hex values):\n"
-                        f"    \"<slug>\": {{\n"
-                        f"        \"input-area\": \"#hex\",\n"
-                        f"        \"placeholder\": \"#hex italic\",\n"
-                        f"        \"prompt\": \"#hex\",\n"
-                        f"        \"prompt-working\": \"#hex italic\",\n"
-                        f"        \"hint\": \"#hex italic\",\n"
-                        f"        \"spinner\": \"#hex\",\n"
-                        f"        \"input-rule\": \"#hex\",\n"
-                        f"        \"image-badge\": \"#hex bold\",\n"
-                        f"        \"completion-menu\": \"bg:#hex #hex\",\n"
-                        f"        \"completion-menu.completion\": \"bg:#hex #hex\",\n"
-                        f"        \"completion-menu.completion.current\": \"bg:#hex #hex\",\n"
-                        f"        \"completion-menu.meta.completion\": \"bg:#hex #hex\",\n"
-                        f"        \"completion-menu.meta.completion.current\": \"bg:#hex #hex\",\n"
-                        f"        \"clarify-border\": \"#hex\",\n"
-                        f"        \"clarify-title\": \"#hex bold\",\n"
-                        f"        \"clarify-question\": \"#hex bold\",\n"
-                        f"        \"clarify-choice\": \"#hex\",\n"
-                        f"        \"clarify-selected\": \"#hex bold\",\n"
-                        f"        \"clarify-active-other\": \"#hex italic\",\n"
-                        f"        \"clarify-countdown\": \"#hex\",\n"
-                        f"        \"sudo-prompt\": \"#hex bold\",\n"
-                        f"        \"sudo-border\": \"#hex\",\n"
-                        f"        \"sudo-title\": \"#hex bold\",\n"
-                        f"        \"sudo-text\": \"#hex\",\n"
-                        f"        \"approval-border\": \"#hex\",\n"
-                        f"        \"approval-title\": \"#hex bold\",\n"
-                        f"        \"approval-desc\": \"#hex bold\",\n"
-                        f"        \"approval-cmd\": \"#hex italic\",\n"
-                        f"        \"approval-choice\": \"#hex\",\n"
-                        f"        \"approval-selected\": \"#hex bold\",\n"
-                        f"    }},\n\n"
-                        f"Do not use execute_code. Use read_file and patch tools only."
-                    )
+                import re as _re
+                slug = _re.sub(r'[^a-z0-9]', '', description.split()[0].lower())[:12] or "custom"
+                if slug in _SKIN_THEMES:
+                    print(f"  Skin \"{slug}\" already exists. Use /skin {slug} to apply it.")
+                    return
+
+                _REQUIRED_KEYS = [
+                    "input-area", "placeholder", "prompt", "prompt-working", "hint", "spinner",
+                    "input-rule", "image-badge",
+                    "completion-menu", "completion-menu.completion",
+                    "completion-menu.completion.current", "completion-menu.meta.completion",
+                    "completion-menu.meta.completion.current",
+                    "clarify-border", "clarify-title", "clarify-question", "clarify-choice",
+                    "clarify-selected", "clarify-active-other", "clarify-countdown",
+                    "sudo-prompt", "sudo-border", "sudo-title", "sudo-text",
+                    "approval-border", "approval-title", "approval-desc", "approval-cmd",
+                    "approval-choice", "approval-selected",
+                ]
+
+                def _create_skin():
+                    try:
+                        from openai import OpenAI
+                        print(f"  Generating \"{slug}\" skin...")
+                        client = OpenAI(
+                            base_url="https://openrouter.ai/api/v1",
+                            api_key=os.getenv("OPENROUTER_API_KEY", ""),
+                        )
+                        prompt = (
+                            f"Design a terminal color skin themed: {description}\n\n"
+                            f"Return ONLY a JSON object (no markdown fences) with exactly these keys:\n"
+                            f"- Most keys: \"#RRGGBB\"\n"
+                            f"- italic keys (placeholder, prompt-working, hint, clarify-active-other, approval-cmd): \"#RRGGBB italic\"\n"
+                            f"- bold keys (image-badge, clarify-title, clarify-question, clarify-selected, "
+                            f"sudo-prompt, sudo-title, approval-title, approval-desc, approval-selected): \"#RRGGBB bold\"\n"
+                            f"- completion-menu keys (5): \"bg:#RRGGBB #RRGGBB\" (bg then fg; *.current variants should contrast)\n\n"
+                            f"Keys: {', '.join(_REQUIRED_KEYS)}"
+                        )
+                        resp = client.chat.completions.create(
+                            model="anthropic/claude-haiku-4-5",
+                            messages=[
+                                {"role": "system", "content": "You are a terminal palette designer. Return only valid JSON, no explanation."},
+                                {"role": "user", "content": prompt},
+                            ],
+                            max_tokens=900,
+                            temperature=0.8,
+                        )
+                        raw = resp.choices[0].message.content.strip()
+                        if "```" in raw:
+                            raw = raw.split("```")[1]
+                            if raw.startswith("json"):
+                                raw = raw[4:]
+                            raw = raw.strip()
+                        colors = json.loads(raw)
+                        missing = [k for k in _REQUIRED_KEYS if k not in colors]
+                        if missing:
+                            print(f"  Skin creation failed: missing keys: {missing}")
+                            return
+
+                        # Patch _SKIN_THEMES in the source file
+                        cli_path = os.path.abspath(__file__)
+                        with open(cli_path, "r", encoding="utf-8") as fh:
+                            src = fh.read()
+                        entry_lines = [f'    "{slug}": {{']
+                        for k in _REQUIRED_KEYS:
+                            entry_lines.append(f'        "{k}": "{colors[k]}",')
+                        entry_lines.append('    },')
+                        entry = "\n".join(entry_lines)
+                        marker = "    },\n}\n\ndef _cprint"
+                        if marker not in src:
+                            print(f"  Skin creation failed: could not locate _SKIN_THEMES closing in {cli_path}")
+                            return
+                        new_src = src.replace(marker, f"{entry}\n}}\n\ndef _cprint", 1)
+                        with open(cli_path, "w", encoding="utf-8") as fh:
+                            fh.write(new_src)
+
+                        # Register in live dict and apply
+                        _SKIN_THEMES[slug] = {k: colors[k] for k in _REQUIRED_KEYS}
+                        self._apply_skin(slug)
+                        print(f"  Skin \"{slug}\" created and applied.")
+                    except json.JSONDecodeError as exc:
+                        print(f"  Skin creation failed: invalid JSON from model ({exc})")
+                    except Exception as exc:
+                        print(f"  Skin creation failed: {exc}")
+
+                threading.Thread(target=_create_skin, daemon=True).start()
                 return
             print(f"Unknown sub-command: /skin:{keyword}  (available: toggle, create)")
             return
