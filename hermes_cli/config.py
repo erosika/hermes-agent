@@ -14,7 +14,9 @@ This module provides:
 
 import os
 import platform
+import re
 import stat
+import sys
 import subprocess
 import sys
 import tempfile
@@ -22,6 +24,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
 _IS_WINDOWS = platform.system() == "Windows"
+_ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 import yaml
 
@@ -121,7 +124,7 @@ DEFAULT_CONFIG = {
     
     "compression": {
         "enabled": True,
-        "threshold": 0.85,
+        "threshold": 0.50,
         "summary_model": "google/gemini-3-flash-preview",
         "summary_provider": "auto",
     },
@@ -191,8 +194,13 @@ DEFAULT_CONFIG = {
     },
     
     "stt": {
-        "enabled": True,
-        "model": "whisper-1",
+        "provider": "local",  # "local" (free, faster-whisper) | "openai" (Whisper API)
+        "local": {
+            "model": "base",  # tiny, base, small, medium, large-v3
+        },
+        "openai": {
+            "model": "whisper-1",  # whisper-1, gpt-4o-mini-transcribe, gpt-4o-transcribe
+        },
     },
     
     "human_delay": {
@@ -984,6 +992,9 @@ def load_env() -> Dict[str, str]:
 
 def save_env_value(key: str, value: str):
     """Save or update a value in ~/.hermes/.env."""
+    if not _ENV_VAR_NAME_RE.match(key):
+        raise ValueError(f"Invalid environment variable name: {key!r}")
+    value = value.replace("\n", "").replace("\r", "")
     ensure_hermes_home()
     env_path = get_env_path()
     
@@ -1026,12 +1037,38 @@ def save_env_value(key: str, value: str):
         raise
     _secure_file(env_path)
 
+    os.environ[key] = value
+
     # Restrict .env permissions to owner-only (contains API keys)
     if not _IS_WINDOWS:
         try:
             os.chmod(env_path, stat.S_IRUSR | stat.S_IWUSR)
         except OSError:
             pass
+
+
+def save_anthropic_oauth_token(value: str, save_fn=None):
+    """Persist an Anthropic OAuth/setup token and clear the API-key slot."""
+    writer = save_fn or save_env_value
+    writer("ANTHROPIC_TOKEN", value)
+    writer("ANTHROPIC_API_KEY", "")
+
+
+def save_anthropic_api_key(value: str, save_fn=None):
+    """Persist an Anthropic API key and clear the OAuth/setup-token slot."""
+    writer = save_fn or save_env_value
+    writer("ANTHROPIC_API_KEY", value)
+    writer("ANTHROPIC_TOKEN", "")
+
+
+def save_env_value_secure(key: str, value: str) -> Dict[str, Any]:
+    save_env_value(key, value)
+    return {
+        "success": True,
+        "stored_as": key,
+        "validated": False,
+    }
+
 
 
 def get_env_value(key: str) -> Optional[str]:
@@ -1061,7 +1098,6 @@ def redact_key(key: str) -> str:
 def show_config():
     """Display current configuration."""
     config = load_config()
-    env_vars = load_env()
     
     print()
     print(color("┌─────────────────────────────────────────────────────────┐", Colors.CYAN))
@@ -1081,7 +1117,6 @@ def show_config():
     
     keys = [
         ("OPENROUTER_API_KEY", "OpenRouter"),
-        ("ANTHROPIC_API_KEY", "Anthropic"),
         ("VOICE_TOOLS_OPENAI_KEY", "OpenAI (STT/TTS)"),
         ("FIRECRAWL_API_KEY", "Firecrawl"),
         ("BROWSERBASE_API_KEY", "Browserbase"),
@@ -1091,6 +1126,8 @@ def show_config():
     for env_key, name in keys:
         value = get_env_value(env_key)
         print(f"  {name:<14} {redact_key(value)}")
+    anthropic_value = get_env_value("ANTHROPIC_TOKEN") or get_env_value("ANTHROPIC_API_KEY")
+    print(f"  {'Anthropic':<14} {redact_key(anthropic_value)}")
     
     # Model settings
     print()
@@ -1149,7 +1186,7 @@ def show_config():
     enabled = compression.get('enabled', True)
     print(f"  Enabled:      {'yes' if enabled else 'no'}")
     if enabled:
-        print(f"  Threshold:    {compression.get('threshold', 0.85) * 100:.0f}%")
+        print(f"  Threshold:    {compression.get('threshold', 0.50) * 100:.0f}%")
         print(f"  Model:        {compression.get('summary_model', 'google/gemini-3-flash-preview')}")
         comp_provider = compression.get('summary_provider', 'auto')
         if comp_provider != 'auto':
@@ -1216,7 +1253,7 @@ def edit_config():
                 break
     
     if not editor:
-        print(f"No editor found. Config file is at:")
+        print("No editor found. Config file is at:")
         print(f"  {config_path}")
         return
     
@@ -1421,7 +1458,7 @@ def config_command(args):
         if missing_config:
             print()
             print(color(f"  {len(missing_config)} new config option(s) available", Colors.YELLOW))
-            print(f"    Run 'hermes config migrate' to add them")
+            print("    Run 'hermes config migrate' to add them")
         
         print()
     

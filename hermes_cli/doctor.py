@@ -38,6 +38,7 @@ _PROVIDER_ENV_HINTS = (
     "OPENROUTER_API_KEY",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
+    "ANTHROPIC_TOKEN",
     "OPENAI_BASE_URL",
     "GLM_API_KEY",
     "ZAI_API_KEY",
@@ -51,6 +52,33 @@ _PROVIDER_ENV_HINTS = (
 def _has_provider_env_config(content: str) -> bool:
     """Return True when ~/.hermes/.env contains provider auth/base URL settings."""
     return any(key in content for key in _PROVIDER_ENV_HINTS)
+
+
+def _honcho_is_configured_for_doctor() -> bool:
+    """Return True when Honcho is configured, even if this process has no active session."""
+    try:
+        from honcho_integration.client import HonchoClientConfig
+
+        cfg = HonchoClientConfig.from_global_config()
+        return bool(cfg.enabled and cfg.api_key)
+    except Exception:
+        return False
+
+
+def _apply_doctor_tool_availability_overrides(available: list[str], unavailable: list[dict]) -> tuple[list[str], list[dict]]:
+    """Adjust runtime-gated tool availability for doctor diagnostics."""
+    if not _honcho_is_configured_for_doctor():
+        return available, unavailable
+
+    updated_available = list(available)
+    updated_unavailable = []
+    for item in unavailable:
+        if item.get("name") == "honcho":
+            if "honcho" not in updated_available:
+                updated_available.append("honcho")
+            continue
+        updated_unavailable.append(item)
+    return updated_available, updated_unavailable
 
 
 def check_ok(text: str, detail: str = ""):
@@ -69,6 +97,10 @@ def check_info(text: str):
 def run_doctor(args):
     """Run diagnostic checks."""
     should_fix = getattr(args, 'fix', False)
+
+    # Doctor runs from the interactive CLI, so CLI-gated tool availability
+    # checks (like cronjob management) should see the same context as `hermes`.
+    os.environ.setdefault("HERMES_INTERACTIVE", "1")
     
     issues = []
     manual_issues = []  # issues that can't be auto-fixed
@@ -466,17 +498,22 @@ def run_doctor(args):
     else:
         check_warn("OpenRouter API", "(not configured)")
     
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    anthropic_key = os.getenv("ANTHROPIC_TOKEN") or os.getenv("ANTHROPIC_API_KEY")
     if anthropic_key:
         print("  Checking Anthropic API...", end="", flush=True)
         try:
             import httpx
+            from agent.anthropic_adapter import _is_oauth_token, _COMMON_BETAS, _OAUTH_ONLY_BETAS
+
+            headers = {"anthropic-version": "2023-06-01"}
+            if _is_oauth_token(anthropic_key):
+                headers["Authorization"] = f"Bearer {anthropic_key}"
+                headers["anthropic-beta"] = ",".join(_COMMON_BETAS + _OAUTH_ONLY_BETAS)
+            else:
+                headers["x-api-key"] = anthropic_key
             response = httpx.get(
                 "https://api.anthropic.com/v1/models",
-                headers={
-                    "x-api-key": anthropic_key,
-                    "anthropic-version": "2023-06-01"
-                },
+                headers=headers,
                 timeout=10
             )
             if response.status_code == 200:
@@ -582,6 +619,7 @@ def run_doctor(args):
         from model_tools import check_tool_availability, TOOLSET_REQUIREMENTS
         
         available, unavailable = check_tool_availability()
+        available, unavailable = _apply_doctor_tool_availability_overrides(available, unavailable)
         
         for tid in available:
             info = TOOLSET_REQUIREMENTS.get(tid, {})
