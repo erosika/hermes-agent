@@ -4109,32 +4109,20 @@ class AIAgent:
 
             # Build the final system message: cached prompt + ephemeral system prompt.
             # Ephemeral additions are API-call-time only (not persisted to session DB).
-            # NOTE: Honcho turn context is NOT appended here -- it goes into a
-            # separate injected message so the system prefix stays stable for
-            # prompt caching (Anthropic, OpenRouter, OpenAI all require exact
-            # prefix matches).
             effective_system = active_system_prompt or ""
             if self.ephemeral_system_prompt:
                 effective_system = (effective_system + "\n\n" + self.ephemeral_system_prompt).strip()
+            if self._honcho_turn_context:
+                effective_system = (effective_system + "\n\n" + self._honcho_turn_context).strip()
             if effective_system:
                 api_messages = [{"role": "system", "content": effective_system}] + api_messages
 
             # Inject ephemeral prefill messages right after the system prompt
             # but before conversation history. Same API-call-time-only pattern.
-            inject_offset = 1 if effective_system else 0
             if self.prefill_messages:
+                sys_offset = 1 if effective_system else 0
                 for idx, pfm in enumerate(self.prefill_messages):
-                    api_messages.insert(inject_offset + idx, pfm.copy())
-                inject_offset += len(self.prefill_messages)
-
-            # Inject Honcho turn-varying recall as a separate user message so
-            # the system prompt prefix remains stable for prompt caching.
-            if self._honcho_turn_context:
-                honcho_msg = {
-                    "role": "user",
-                    "content": f"<honcho-context>\n{self._honcho_turn_context}\n</honcho-context>",
-                }
-                api_messages.insert(inject_offset, honcho_msg)
+                    api_messages.insert(sys_offset + idx, pfm.copy())
 
             # Apply Anthropic prompt caching for Claude models via OpenRouter.
             # Auto-detected: if model name contains "claude" and base_url is OpenRouter,
