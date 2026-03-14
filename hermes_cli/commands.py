@@ -45,6 +45,9 @@ COMMANDS_BY_CATEGORY = {
         "/cron": "Manage scheduled tasks (list, add, remove)",
         "/reload-mcp": "Reload MCP servers from config.yaml",
     },
+    "Radio": {
+        "/radio": "Open the radio player (browse stations, crate dig, play streams)",
+    },
     "Info": {
         "/help": "Show this help message",
         "/usage": "Show token usage for the current session",

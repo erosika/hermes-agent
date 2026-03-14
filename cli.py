@@ -2921,6 +2921,8 @@ class HermesCLI:
             self._handle_rollback_command(cmd_original)
         elif cmd_lower.startswith("/background"):
             self._handle_background_command(cmd_original)
+        elif cmd_lower.startswith("/radio"):
+            self._handle_radio_command(cmd_original)
         elif cmd_lower.startswith("/skin"):
             self._handle_skin_command(cmd_original)
         else:
@@ -3078,6 +3080,201 @@ class HermesCLI:
         thread = threading.Thread(target=run_background, daemon=True, name=f"bg-task-{task_id}")
         self._background_tasks[task_id] = thread
         thread.start()
+
+    def _handle_radio_command(self, cmd: str):
+        """Handle /radio -- open the interactive radio menu."""
+        import shutil as _shutil
+        if not _shutil.which("mpv"):
+            print("mpv not installed. Install: brew install mpv")
+            return
+
+        try:
+            from radio.menu import radio_menu, search_menu
+            from radio.player import HermesRadio, check_radio_available
+        except ImportError as e:
+            print(f"Radio module not available: {e}")
+            return
+
+        # Use the persistent radio event loop (no loop creation/destruction)
+        from tools.radio_tool import _run_radio_async as _run
+
+        self._handle_radio_command_inner(cmd, _run, radio_menu, search_menu, HermesRadio)
+
+    def _handle_radio_command_inner(self, cmd, _run, radio_menu, search_menu, HermesRadio):
+        """Inner handler for /radio (uses a single event loop via _run)."""
+        # Gather state for the menu
+        now = None
+        if HermesRadio.active():
+            np = HermesRadio.get().now_playing()
+            now = {
+                "active": np.active,
+                "title": np.title,
+                "artist": np.artist,
+                "paused": np.paused,
+                "station_name": np.station_name,
+            }
+
+        # Fetch SomaFM channels (quick, cached after first call)
+        soma = None
+        try:
+            import asyncio as _aio
+            from radio.somafm import get_featured
+            soma = _run(get_featured())
+            soma = [{"id": ch.id, "title": ch.title, "genre": ch.genre} for ch in soma]
+        except Exception:
+            pass
+
+        # Load presets from config
+        presets = self.config.get("radio", {}).get("presets", {})
+
+        # Show the menu
+        selected = radio_menu(now_playing=now, soma_channels=soma, presets=presets)
+        if not selected:
+            return
+
+        # Execute the selection
+        import asyncio as _aio
+        radio = HermesRadio.get()
+
+        # Apply config if available
+        radio.configure(self.config)
+
+        action = selected.action
+        data = selected.data
+
+        def _rprint(msg):
+            """Print radio status -- plain text, no ANSI, no Rich."""
+            print(f"  {msg}")
+
+        try:
+            if action == "crate":
+                # Apply mic breaks setting from menu toggles
+                radio._auto_mic_breaks = data.get("mic_breaks", True)
+                result = _run(radio.play_crate(
+                    decades=data.get("decades"),
+                    moods=data.get("moods"),
+                    country=data.get("country"),
+                ))
+                _rprint(result)
+
+            elif action == "somafm":
+                channel_id = data.get("channel_id", "")
+                if channel_id:
+                    from radio.somafm import get_channel
+                    ch = _run(get_channel(channel_id))
+                    if ch and ch.stream_url:
+                        result = _run(radio.play_stream(
+                            ch.stream_url, station_name=f"SomaFM {ch.title}",
+                        ))
+                        _rprint(result)
+                    else:
+                        _rprint(f"Channel not found: {channel_id}")
+
+            elif action == "somafm_refresh":
+                _rprint("Refreshing SomaFM channels...")
+                self._handle_radio_command(cmd)
+
+            elif action == "stream":
+                url = data.get("url", "")
+                name = data.get("name", "")
+                if url:
+                    result = _run(radio.play_stream(url, station_name=name))
+                    _rprint(result)
+
+            elif action == "preset":
+                source = data.get("source", "")
+                if source == "custom" and data.get("url"):
+                    result = _run(radio.play_stream(
+                        data["url"], station_name=data.get("name", ""),
+                    ))
+                    _rprint(result)
+                elif source == "somafm" and data.get("channel"):
+                    from radio.somafm import get_channel
+                    ch = _run(get_channel(data["channel"]))
+                    if ch and ch.stream_url:
+                        result = _run(radio.play_stream(
+                            ch.stream_url, station_name=f"SomaFM {ch.title}",
+                        ))
+                        _rprint(result)
+                elif source == "crate":
+                    result = _run(radio.play_crate(
+                        decades=data.get("decades"),
+                        moods=data.get("moods"),
+                        country=data.get("country"),
+                    ))
+                    _rprint(result)
+
+            elif action == "search_rb":
+                print("  Enter search query: ", end="", flush=True)
+                try:
+                    query = input().strip()
+                except (EOFError, KeyboardInterrupt):
+                    return
+                if not query:
+                    return
+                from radio.radio_browser import RadioBrowserClient
+                client = RadioBrowserClient()
+                results = _run(client.search(name=query, limit=20))
+                _run(client.close())
+                if not results:
+                    client2 = RadioBrowserClient()
+                    results = _run(client2.search(tag=query, limit=20))
+                    _run(client2.close())
+                display = [
+                    {"name": s.name, "country": s.country, "tags": s.tags, "url": s.stream_url}
+                    for s in results
+                ]
+                picked = search_menu(display, title=f"Results for \"{query}\"")
+                if picked and picked.get("url"):
+                    result = _run(radio.play_stream(
+                        picked["url"], station_name=picked.get("name", ""),
+                    ))
+                    _rprint(result)
+
+            elif action == "search_rg":
+                print("  Enter city name: ", end="", flush=True)
+                try:
+                    query = input().strip()
+                except (EOFError, KeyboardInterrupt):
+                    return
+                if not query:
+                    return
+                from radio.radio_garden import RadioGardenClient
+                rg = RadioGardenClient()
+                stations = _run(rg.explore(query, limit=20))
+                _run(rg.close())
+                if not stations:
+                    _rprint(f"No stations found near \"{query}\"")
+                    return
+                display = [
+                    {"name": s.title, "country": s.country or s.place, "url": s.stream_url}
+                    for s in stations
+                ]
+                picked = search_menu(display, title=f"Stations near \"{query}\"")
+                if picked and picked.get("url"):
+                    result = _run(radio.play_stream(
+                        picked["url"], station_name=picked.get("name", ""),
+                    ))
+                    _rprint(result)
+
+            elif action == "toggle_pause":
+                result = _run(radio.toggle_pause())
+                _rprint(result)
+
+            elif action == "skip":
+                result = _run(radio.skip())
+                _rprint(result)
+
+            elif action == "stop":
+                _run(radio.stop())
+                _rprint("Radio stopped")
+
+        except Exception as e:
+            _rprint(f"Radio error: {e}")
+
+        # Refresh the mini player widget
+        if self._app:
+            self._app.invalidate()
 
     def _handle_skin_command(self, cmd: str):
         """Handle /skin [name] — show or change the display skin."""
@@ -4644,6 +4841,16 @@ class HermesCLI:
             height=Condition(lambda: bool(cli_ref._attached_images)),
         )
 
+        # Radio mini player -- compact now-playing bar below the input
+        try:
+            from radio.mini_player import get_mini_player_text, get_mini_player_height
+            radio_widget = Window(
+                content=FormattedTextControl(get_mini_player_text),
+                height=get_mini_player_height,
+            )
+        except ImportError:
+            radio_widget = Window(height=0)
+
         # Layout: interactive prompt widgets + ruled input at bottom.
         # The sudo, approval, and clarify widgets appear above the input when
         # the corresponding interactive prompt is active.
@@ -4660,6 +4867,7 @@ class HermesCLI:
                 image_bar,
                 input_area,
                 input_rule_bot,
+                radio_widget,
                 CompletionsMenu(max_height=12, scroll_offset=1),
             ])
         )
@@ -4700,6 +4908,13 @@ class HermesCLI:
             'approval-cmd': '#AAAAAA italic',
             'approval-choice': '#AAAAAA',
             'approval-selected': '#FFD700 bold',
+            # Radio mini player
+            'radio-bars': '#7eb8f6',
+            'radio-title': '#e6edf3 bold',
+            'radio-tags': '#6e7681',
+            'radio-station': '#7ee6a8',
+            'radio-time': '#6e7681',
+            'radio-vol': '#484f58',
         })
         
         # Create the application
@@ -4721,6 +4936,16 @@ class HermesCLI:
                     self._invalidate(min_interval=0.1)
                     _time.sleep(0.1)
                 else:
+                    # Refresh mini player when radio is active
+                    # (reads cached state only -- no async calls)
+                    try:
+                        from radio.player import HermesRadio
+                        if HermesRadio.active() and self._app:
+                            self._invalidate(min_interval=0.25)
+                            _time.sleep(0.3)  # match bar animation slot
+                            continue
+                    except ImportError:
+                        pass
                     _time.sleep(0.05)
 
         spinner_thread = threading.Thread(target=spinner_loop, daemon=True)
