@@ -1,15 +1,25 @@
-"""Interactive radio menu for the Hermes CLI.
+"""Radio menu for the Hermes CLI.
 
-Uses simple numbered print+input interface that works reliably inside
-prompt_toolkit's patched stdout context (curses conflicts with it).
+Two modes:
+1. TUI mode -- ConditionalContainer inside prompt_toolkit with arrow key
+   navigation, space to toggle, enter to select, q/esc to close.
+   State is managed via cli._radio_menu_state dict.
+2. Fallback mode -- numbered print+input for environments where the TUI
+   widget can't render.
+
+The CLI integration (widget, key bindings) lives in cli.py. This module
+provides the data model and rendering logic.
 """
 
-from typing import Any, Dict, List, Optional
+import threading
+from typing import Any, Dict, List, Optional, Set, Tuple
 
+
+# -- Data model ------------------------------------------------------------
 
 class MenuItem:
-    """A single item in the radio menu."""
-    __slots__ = ("label", "sublabel", "action", "data", "is_header", "is_toggle", "toggled", "toggle_key")
+    __slots__ = ("label", "sublabel", "action", "data",
+                 "is_header", "is_toggle", "toggled", "toggle_key")
 
     def __init__(
         self,
@@ -32,115 +42,105 @@ class MenuItem:
         self.toggle_key = toggle_key
 
 
-def radio_menu(
-    now_playing: Optional[dict] = None,
-    soma_channels: Optional[list] = None,
-    presets: Optional[Dict[str, dict]] = None,
-) -> Optional[MenuItem]:
-    """Print the radio menu and return the selected MenuItem or None."""
+# -- Menu state (shared between menu.py and cli.py) ------------------------
 
-    # Mutable toggle state
-    active_decades = {1950, 1960, 1970, 1980, 1990}
-    active_moods = {"slow", "fast", "weird"}
-    mic_breaks = True
+class RadioMenuState:
+    """Mutable state for the radio menu widget."""
 
-    while True:
-        items = _build_items(
-            soma_channels=soma_channels,
-            now_playing=now_playing,
-            presets=presets,
-            active_decades=active_decades,
-            active_moods=active_moods,
-            mic_breaks=mic_breaks,
-        )
+    def __init__(self, items: List[MenuItem]):
+        self.items = items
+        self.selectable = [i for i, it in enumerate(items) if not it.is_header]
+        self.cursor = 0  # index into self.selectable
+        self.result: Optional[MenuItem] = None
+        self.done = threading.Event()
+        self.viewport_start = 0
 
-        # Print menu
-        print()
-        print("  HERMES RADIO")
-        print("  " + "\u2500" * 50)
+        # Mutable toggle state
+        self.active_decades: Set[int] = {1950, 1960, 1970, 1980, 1990}
+        self.active_moods: Set[str] = {"slow", "fast", "weird"}
+        self.mic_breaks: bool = True
 
-        # Number only selectable items
-        num = 0
-        idx_map = {}  # number -> items index
-        for i, item in enumerate(items):
-            if item.is_header:
-                if item.label:
-                    print(f"\n  {item.label}")
-                continue
+    @property
+    def cursor_abs(self) -> int:
+        """Absolute index into items list."""
+        if not self.selectable:
+            return 0
+        return self.selectable[min(self.cursor, len(self.selectable) - 1)]
 
-            num += 1
-            idx_map[num] = i
+    def move_up(self):
+        self.cursor = max(0, self.cursor - 1)
 
-            if item.is_toggle:
-                check = "\u25a0" if item.toggled else "\u25a1"
-                label = f"  {check} {item.label.strip()}"
+    def move_down(self):
+        self.cursor = min(len(self.selectable) - 1, self.cursor + 1)
+
+    def page_up(self, page_size: int = 10):
+        self.cursor = max(0, self.cursor - page_size)
+
+    def page_down(self, page_size: int = 10):
+        self.cursor = min(len(self.selectable) - 1, self.cursor + page_size)
+
+    def jump_to_section(self, direction: int = 1):
+        """Jump to the next (1) or previous (-1) section header."""
+        start = self.cursor
+        pos = start + direction
+        while 0 <= pos < len(self.selectable):
+            abs_idx = self.selectable[pos]
+            # Check if the item above is a header (section boundary)
+            if abs_idx > 0 and self.items[abs_idx - 1].is_header:
+                self.cursor = pos
+                return
+            pos += direction
+
+    def toggle_current(self):
+        """Toggle the current item if it's a toggle. Returns True if toggled."""
+        item = self.items[self.cursor_abs]
+        if not item.is_toggle:
+            return False
+
+        tk = item.toggle_key
+        if tk.startswith("decade:"):
+            decade = int(tk.split(":")[1])
+            if decade in self.active_decades:
+                self.active_decades.discard(decade)
             else:
-                label = f"    {item.label.strip()}"
+                self.active_decades.add(decade)
+            item.toggled = decade in self.active_decades
+        elif tk.startswith("mood:"):
+            mood = tk.split(":")[1]
+            if mood in self.active_moods:
+                if len(self.active_moods) > 1:
+                    self.active_moods.discard(mood)
+            else:
+                self.active_moods.add(mood)
+            item.toggled = mood in self.active_moods
+        elif tk == "mic_breaks":
+            self.mic_breaks = not self.mic_breaks
+            item.toggled = self.mic_breaks
+        return True
 
-            sub = f"  ({item.sublabel})" if item.sublabel else ""
-            print(f"  {num:2d}. {label}{sub}")
-
-        # Footer
-        decades_str = ", ".join(f"{d}s" for d in sorted(active_decades))
-        moods_str = ", ".join(sorted(active_moods))
-        mic_str = "on" if mic_breaks else "off"
-        print(f"\n  decades: {decades_str}")
-        print(f"  moods: {moods_str}  |  mic breaks: {mic_str}")
-        print()
-
-        # Get input
-        try:
-            raw = input("  Enter number (or q to quit): ").strip()
-        except (EOFError, KeyboardInterrupt):
-            return None
-
-        if raw.lower() in ("q", "quit", ""):
-            return None
-
-        try:
-            choice = int(raw)
-        except ValueError:
-            print(f"  Invalid input: {raw}")
-            continue
-
-        if choice not in idx_map:
-            print(f"  Invalid choice: {choice}")
-            continue
-
-        item = items[idx_map[choice]]
-
-        # Handle toggles (loop back to redisplay)
+    def select_current(self):
+        """Select the current item. For toggles, toggle. For actions, set result and signal done."""
+        item = self.items[self.cursor_abs]
         if item.is_toggle:
-            tk = item.toggle_key
-            if tk.startswith("decade:"):
-                decade = int(tk.split(":")[1])
-                if decade in active_decades:
-                    active_decades.discard(decade)
-                else:
-                    active_decades.add(decade)
-            elif tk.startswith("mood:"):
-                mood = tk.split(":")[1]
-                if mood in active_moods:
-                    if len(active_moods) > 1:
-                        active_moods.discard(mood)
-                else:
-                    active_moods.add(mood)
-            elif tk == "mic_breaks":
-                mic_breaks = not mic_breaks
-            continue  # redisplay menu
+            self.toggle_current()
+            return
 
-        # Action item -- inject toggle state
+        # Inject toggle state into the action data
         if item.action == "crate":
-            item.data["decades"] = sorted(active_decades) if active_decades else None
-            item.data["moods"] = sorted(active_moods) if active_moods else None
-            item.data["mic_breaks"] = mic_breaks
-        else:
-            item.data["mic_breaks"] = mic_breaks
+            item.data["decades"] = sorted(self.active_decades) if self.active_decades else None
+            item.data["moods"] = sorted(self.active_moods) if self.active_moods else None
+        item.data["mic_breaks"] = self.mic_breaks
+        self.result = item
+        self.done.set()
 
-        return item
+    def cancel(self):
+        self.result = None
+        self.done.set()
 
 
-def _build_items(
+# -- Build items -----------------------------------------------------------
+
+def build_menu_items(
     soma_channels=None, now_playing=None, presets=None,
     active_decades=None, active_moods=None, mic_breaks=True,
 ) -> List[MenuItem]:
@@ -157,18 +157,18 @@ def _build_items(
         title = now_playing.get("title", "")
         artist = now_playing.get("artist", "")
         display = f"{artist} \u2014 {title}" if artist else title
-        prefix = "\u25b6" if not now_playing.get("paused") else "\u2759\u2759"
+        prefix = "\u25b6" if not now_playing.get("paused") else "\u23f8"
         items.append(MenuItem(label=f"{prefix} {display}", sublabel=now_playing.get("station_name", ""), action="toggle_pause"))
-        items.append(MenuItem(label="Skip", action="skip"))
-        items.append(MenuItem(label="Stop", action="stop"))
+        items.append(MenuItem(label="Skip track", action="skip"))
+        items.append(MenuItem(label="Stop radio", action="stop"))
 
     # Decades
-    items.append(MenuItem(label="DECADES (toggle)", is_header=True))
+    items.append(MenuItem(label="DECADES", is_header=True))
     for decade in [1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020]:
         items.append(MenuItem(label=f"{decade}s", is_toggle=True, toggled=decade in active_decades, toggle_key=f"decade:{decade}"))
 
     # Moods
-    items.append(MenuItem(label="MOODS (toggle)", is_header=True))
+    items.append(MenuItem(label="MOODS", is_header=True))
     for mood, desc in [("weird", "the good stuff"), ("slow", "deep, contemplative"), ("fast", "upbeat, energetic")]:
         items.append(MenuItem(label=mood, sublabel=desc, is_toggle=True, toggled=mood in active_moods, toggle_key=f"mood:{mood}"))
 
@@ -179,18 +179,16 @@ def _build_items(
     # Crate dig
     items.append(MenuItem(label="CRATE DIGGER", is_header=True))
     items.append(MenuItem(label="Dig (selected decades + moods)", sublabel="Radiooooo", action="crate"))
-    items.append(MenuItem(label="Dig Japan", sublabel="JPN", action="crate", data={"country": "JPN"}))
-    items.append(MenuItem(label="Dig France", sublabel="FRA", action="crate", data={"country": "FRA"}))
-    items.append(MenuItem(label="Dig UK", sublabel="GBR", action="crate", data={"country": "GBR"}))
-    items.append(MenuItem(label="Dig USA", sublabel="USA", action="crate", data={"country": "USA"}))
+    items.append(MenuItem(label="Dig Japan", action="crate", data={"country": "JPN"}))
+    items.append(MenuItem(label="Dig France", action="crate", data={"country": "FRA"}))
+    items.append(MenuItem(label="Dig UK", action="crate", data={"country": "GBR"}))
+    items.append(MenuItem(label="Dig USA", action="crate", data={"country": "USA"}))
 
     # SomaFM
     items.append(MenuItem(label="SOMAFM", is_header=True))
     if soma_channels:
         for ch in soma_channels:
             items.append(MenuItem(label=ch.get("title", ch.get("id", "?")), sublabel=ch.get("genre", ""), action="somafm", data={"channel_id": ch.get("id", "")}))
-    else:
-        items.append(MenuItem(label="(loading...)", action="somafm_refresh"))
 
     # Presets
     if presets:
@@ -206,14 +204,180 @@ def _build_items(
     return items
 
 
+# -- Render for FormattedTextControl ---------------------------------------
+
+VISIBLE_ROWS = 20
+
+
+def render_menu(state: RadioMenuState) -> List[Tuple[str, str]]:
+    """Return styled text fragments for the radio menu widget."""
+    items = state.items
+    cursor_abs = state.cursor_abs
+    fragments: List[Tuple[str, str]] = []
+
+    # Header
+    fragments.append(("class:radio-menu-title", "  HERMES RADIO"))
+    fragments.append(("", "  "))
+    fragments.append(("class:radio-menu-dim", "\u2191\u2193 navigate  "))
+    fragments.append(("class:radio-menu-dim", "Space toggle  "))
+    fragments.append(("class:radio-menu-dim", "Enter select  "))
+    fragments.append(("class:radio-menu-dim", "Tab section  "))
+    fragments.append(("class:radio-menu-dim", "q close"))
+    fragments.append(("", "\n"))
+    fragments.append(("class:radio-menu-border", "  " + "\u2500" * 54 + "\n"))
+
+    # Viewport calculation
+    visible = VISIBLE_ROWS
+    vp = state.viewport_start
+    if cursor_abs < vp:
+        vp = max(0, cursor_abs - 2)
+    elif cursor_abs >= vp + visible:
+        vp = cursor_abs - visible + 3
+    state.viewport_start = vp
+
+    # Scroll indicator top
+    if vp > 0:
+        fragments.append(("class:radio-menu-dim", "  \u25b2 more above\n"))
+
+    rendered = 0
+    for idx in range(vp, len(items)):
+        if rendered >= visible:
+            break
+
+        item = items[idx]
+
+        if item.is_header:
+            if item.label:
+                fragments.append(("class:radio-menu-header", f"\n  {item.label}\n"))
+                rendered += 2
+            else:
+                fragments.append(("", "\n"))
+                rendered += 1
+            continue
+
+        is_selected = (idx == cursor_abs)
+        pointer = " \u25b8 " if is_selected else "   "
+
+        if item.is_toggle:
+            check = "\u25a0" if item.toggled else "\u25a1"
+            text = f"{pointer}{check} {item.label}"
+        else:
+            text = f"{pointer}  {item.label}"
+
+        # Style based on state
+        if is_selected:
+            style = "class:radio-menu-selected"
+        elif item.is_toggle and item.toggled:
+            style = "class:radio-menu-on"
+        elif item.is_toggle:
+            style = "class:radio-menu-off"
+        else:
+            style = "class:radio-menu-item"
+
+        fragments.append((style, text))
+
+        # Sublabel
+        if item.sublabel:
+            fragments.append(("class:radio-menu-dim", f"  {item.sublabel}"))
+
+        fragments.append(("", "\n"))
+        rendered += 1
+
+    # Scroll indicator bottom
+    if vp + visible < len(items):
+        fragments.append(("class:radio-menu-dim", "  \u25bc more below\n"))
+
+    # Footer: current state
+    decades_str = ", ".join(f"{d}s" for d in sorted(state.active_decades)) or "none"
+    moods_str = ", ".join(sorted(state.active_moods)) or "none"
+    mic_str = "on" if state.mic_breaks else "off"
+    fragments.append(("class:radio-menu-border", "\n  " + "\u2500" * 54 + "\n"))
+    fragments.append(("class:radio-menu-dim", f"  decades: {decades_str}  moods: {moods_str}  mic: {mic_str}\n"))
+
+    return fragments
+
+
+# -- Fallback: print+input menu -------------------------------------------
+
+def radio_menu_fallback(
+    now_playing=None, soma_channels=None, presets=None,
+) -> Optional[MenuItem]:
+    """Numbered print+input fallback for non-TUI environments."""
+    active_decades = {1950, 1960, 1970, 1980, 1990}
+    active_moods = {"slow", "fast", "weird"}
+    mic_breaks = True
+
+    while True:
+        items = build_menu_items(
+            soma_channels=soma_channels, now_playing=now_playing,
+            presets=presets, active_decades=active_decades,
+            active_moods=active_moods, mic_breaks=mic_breaks,
+        )
+
+        print("\n  HERMES RADIO\n  " + "\u2500" * 50)
+        num = 0
+        idx_map = {}
+        for i, item in enumerate(items):
+            if item.is_header:
+                if item.label:
+                    print(f"\n  {item.label}")
+                continue
+            num += 1
+            idx_map[num] = i
+            if item.is_toggle:
+                check = "\u25a0" if item.toggled else "\u25a1"
+                label = f"{check} {item.label}"
+            else:
+                label = f"  {item.label}"
+            sub = f"  ({item.sublabel})" if item.sublabel else ""
+            print(f"  {num:2d}. {label}{sub}")
+
+        print(f"\n  decades: {', '.join(f'{d}s' for d in sorted(active_decades))}")
+        print(f"  moods: {', '.join(sorted(active_moods))}  |  mic: {'on' if mic_breaks else 'off'}\n")
+
+        try:
+            raw = input("  Enter number (q to quit): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        if raw.lower() in ("q", "quit", ""):
+            return None
+        try:
+            choice = int(raw)
+        except ValueError:
+            continue
+        if choice not in idx_map:
+            continue
+
+        item = items[idx_map[choice]]
+        if item.is_toggle:
+            tk = item.toggle_key
+            if tk.startswith("decade:"):
+                d = int(tk.split(":")[1])
+                active_decades.symmetric_difference_update({d})
+            elif tk.startswith("mood:"):
+                m = tk.split(":")[1]
+                if m in active_moods and len(active_moods) > 1:
+                    active_moods.discard(m)
+                else:
+                    active_moods.add(m)
+            elif tk == "mic_breaks":
+                mic_breaks = not mic_breaks
+            continue
+
+        if item.action == "crate":
+            item.data["decades"] = sorted(active_decades) if active_decades else None
+            item.data["moods"] = sorted(active_moods) if active_moods else None
+        item.data["mic_breaks"] = mic_breaks
+        return item
+
+
 def search_menu(results: List[Dict[str, Any]], title: str = "Search Results") -> Optional[Dict[str, Any]]:
     """Print search results and return the selected one."""
     if not results:
         print("  No results found.")
         return None
 
-    print(f"\n  {title}")
-    print("  " + "\u2500" * 50)
+    print(f"\n  {title}\n  " + "\u2500" * 50)
     for i, r in enumerate(results, 1):
         name = r.get("name") or r.get("title") or "?"
         extra = r.get("country") or r.get("genre") or r.get("tags", "")
@@ -224,19 +388,15 @@ def search_menu(results: List[Dict[str, Any]], title: str = "Search Results") ->
 
     print()
     try:
-        raw = input("  Enter number (or q to quit): ").strip()
+        raw = input("  Enter number (q to back): ").strip()
     except (EOFError, KeyboardInterrupt):
         return None
-
     if raw.lower() in ("q", "quit", ""):
         return None
-
     try:
         idx = int(raw) - 1
         if 0 <= idx < len(results):
             return results[idx]
     except ValueError:
         pass
-
-    print(f"  Invalid choice: {raw}")
     return None

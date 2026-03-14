@@ -3095,48 +3095,58 @@ class HermesCLI:
             print(f"Radio module not available: {e}")
             return
 
-        # Use the persistent radio event loop (no loop creation/destruction)
         from tools.radio_tool import _run_radio_async as _run
+        from radio.menu import build_menu_items, RadioMenuState, radio_menu_fallback
 
-        self._handle_radio_command_inner(cmd, _run, radio_menu, search_menu, HermesRadio)
-
-    def _handle_radio_command_inner(self, cmd, _run, radio_menu, search_menu, HermesRadio):
-        """Inner handler for /radio (uses a single event loop via _run)."""
-        # Gather state for the menu
+        # Gather state
         now = None
         if HermesRadio.active():
             np = HermesRadio.get().now_playing()
-            now = {
-                "active": np.active,
-                "title": np.title,
-                "artist": np.artist,
-                "paused": np.paused,
-                "station_name": np.station_name,
-            }
+            now = {"active": np.active, "title": np.title, "artist": np.artist,
+                   "paused": np.paused, "station_name": np.station_name}
 
-        # Fetch SomaFM channels (quick, cached after first call)
         soma = None
         try:
-            import asyncio as _aio
             from radio.somafm import get_featured
             soma = _run(get_featured())
             soma = [{"id": ch.id, "title": ch.title, "genre": ch.genre} for ch in soma]
         except Exception:
             pass
 
-        # Load presets from config
         presets = self.config.get("radio", {}).get("presets", {})
 
-        # Show the menu
-        selected = radio_menu(now_playing=now, soma_channels=soma, presets=presets)
+        # Try TUI widget first, fall back to numbered menu
+        selected = None
+        try:
+            if self._app:
+                items = build_menu_items(soma_channels=soma, now_playing=now, presets=presets)
+                state = RadioMenuState(items)
+                self._radio_menu_state = state
+                self._app.invalidate()
+                state.done.wait()  # blocks until user picks or cancels
+                selected = state.result
+                self._radio_menu_state = None
+                self._app.invalidate()
+            else:
+                raise RuntimeError("No app")
+        except Exception:
+            # Fallback to print+input
+            self._radio_menu_state = None
+            selected = radio_menu_fallback(now_playing=now, soma_channels=soma, presets=presets)
+
         if not selected:
             return
 
-        # Execute the selection
-        import asyncio as _aio
         radio = HermesRadio.get()
+        radio.configure(self.config)
+        self._handle_radio_command_inner(cmd, _run, radio_menu, search_menu, HermesRadio, selected)
 
-        # Apply config if available
+    def _handle_radio_command_inner(self, cmd, _run, radio_menu, search_menu, HermesRadio, selected=None):
+        """Execute the selected radio menu item."""
+        if selected is None:
+            return
+
+        radio = HermesRadio.get()
         radio.configure(self.config)
 
         action = selected.action
@@ -4078,6 +4088,9 @@ class HermesCLI:
         self._approval_state = None     # dict with command, description, choices, selected, response_queue
         self._approval_deadline = 0
 
+        # Radio menu state (ConditionalContainer-driven, like clarify/approval)
+        self._radio_menu_state = None  # RadioMenuState when active
+
         # Slash command loading state
         self._command_running = False
         self._command_status = ""
@@ -4245,12 +4258,72 @@ class HermesCLI:
                 self._approval_state["selected"] = min(max_idx, self._approval_state["selected"] + 1)
                 event.app.invalidate()
 
+        # --- Radio menu: arrow key navigation, toggle, select ---
+        _radio_active = Condition(lambda: self._radio_menu_state is not None)
+
+        @kb.add('up', filter=_radio_active)
+        @kb.add('k', filter=_radio_active)
+        def radio_up(event):
+            if self._radio_menu_state:
+                self._radio_menu_state.move_up()
+                event.app.invalidate()
+
+        @kb.add('down', filter=_radio_active)
+        @kb.add('j', filter=_radio_active)
+        def radio_down(event):
+            if self._radio_menu_state:
+                self._radio_menu_state.move_down()
+                event.app.invalidate()
+
+        @kb.add('pageup', filter=_radio_active)
+        def radio_pgup(event):
+            if self._radio_menu_state:
+                self._radio_menu_state.page_up()
+                event.app.invalidate()
+
+        @kb.add('pagedown', filter=_radio_active)
+        def radio_pgdn(event):
+            if self._radio_menu_state:
+                self._radio_menu_state.page_down()
+                event.app.invalidate()
+
+        @kb.add('tab', filter=_radio_active)
+        def radio_tab(event):
+            if self._radio_menu_state:
+                self._radio_menu_state.jump_to_section(1)
+                event.app.invalidate()
+
+        @kb.add('s-tab', filter=_radio_active)
+        def radio_stab(event):
+            if self._radio_menu_state:
+                self._radio_menu_state.jump_to_section(-1)
+                event.app.invalidate()
+
+        @kb.add(' ', filter=_radio_active)
+        def radio_space(event):
+            if self._radio_menu_state:
+                self._radio_menu_state.toggle_current()
+                event.app.invalidate()
+
+        @kb.add('enter', filter=_radio_active)
+        def radio_enter(event):
+            if self._radio_menu_state:
+                self._radio_menu_state.select_current()
+                event.app.invalidate()
+
+        @kb.add('q', filter=_radio_active)
+        @kb.add('escape', filter=_radio_active)
+        def radio_quit(event):
+            if self._radio_menu_state:
+                self._radio_menu_state.cancel()
+                event.app.invalidate()
+
         # --- History navigation: up/down browse history in normal input mode ---
         # The TextArea is multiline, so by default up/down only move the cursor.
         # Buffer.auto_up/auto_down handle both: cursor movement when multi-line,
         # history browsing when on the first/last line (or single-line input).
         _normal_input = Condition(
-            lambda: not self._clarify_state and not self._approval_state and not self._sudo_state and not self._secret_state
+            lambda: not self._clarify_state and not self._approval_state and not self._sudo_state and not self._secret_state and not self._radio_menu_state
         )
 
         @kb.add('up', filter=_normal_input)
@@ -4851,12 +4924,34 @@ class HermesCLI:
         except ImportError:
             radio_widget = Window(height=0)
 
+        # Radio menu -- full interactive picker (ConditionalContainer)
+        def _get_radio_menu_display():
+            if not cli_ref._radio_menu_state:
+                return []
+            try:
+                from radio.menu import render_menu
+                return render_menu(cli_ref._radio_menu_state)
+            except Exception:
+                return []
+
+        def _radio_menu_height():
+            if not cli_ref._radio_menu_state:
+                return 0
+            from radio.menu import VISIBLE_ROWS
+            return VISIBLE_ROWS + 8  # rows + header/footer/borders
+
+        radio_menu_widget = Window(
+            content=FormattedTextControl(_get_radio_menu_display),
+            height=_radio_menu_height,
+        )
+
         # Layout: interactive prompt widgets + ruled input at bottom.
         # The sudo, approval, and clarify widgets appear above the input when
         # the corresponding interactive prompt is active.
         layout = Layout(
             HSplit([
                 Window(height=0),
+                radio_menu_widget,
                 sudo_widget,
                 secret_widget,
                 approval_widget,
@@ -4908,6 +5003,15 @@ class HermesCLI:
             'approval-cmd': '#AAAAAA italic',
             'approval-choice': '#AAAAAA',
             'approval-selected': '#FFD700 bold',
+            # Radio menu
+            'radio-menu-title': '#e6edf3 bold',
+            'radio-menu-header': '#CD7F32 bold',
+            'radio-menu-border': '#21262d',
+            'radio-menu-dim': '#484f58',
+            'radio-menu-item': '#c9d1d9',
+            'radio-menu-selected': '#7eb8f6 bold',
+            'radio-menu-on': '#7ee6a8',
+            'radio-menu-off': '#484f58',
             # Radio mini player
             'radio-bars': '#7eb8f6',
             'radio-title': '#e6edf3 bold',
