@@ -5053,6 +5053,14 @@ class HermesCLI:
                     self.agent._honcho.shutdown()
                 except Exception:
                     pass
+            # Stop radio if playing
+            try:
+                from radio.player import HermesRadio
+                if HermesRadio.active():
+                    from tools.radio_tool import _run_radio_async
+                    _run_radio_async(HermesRadio.get().stop())
+            except Exception:
+                pass
             # Close session in SQLite
             if hasattr(self, '_session_db') and self._session_db and self.agent:
                 try:
