@@ -3089,7 +3089,7 @@ class HermesCLI:
             return
 
         try:
-            from radio.menu import radio_menu, search_menu
+            from radio.menu import search_menu, radio_menu_fallback
             from radio.player import HermesRadio, check_radio_available
         except ImportError as e:
             print(f"Radio module not available: {e}")
@@ -3139,7 +3139,7 @@ class HermesCLI:
 
         radio = HermesRadio.get()
         radio.configure(self.config)
-        self._handle_radio_command_inner(cmd, _run, radio_menu, search_menu, HermesRadio, selected)
+        self._handle_radio_command_inner(cmd, _run, None, search_menu, HermesRadio, selected)
 
     def _handle_radio_command_inner(self, cmd, _run, radio_menu, search_menu, HermesRadio, selected=None):
         """Execute the selected radio menu item."""
