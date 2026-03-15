@@ -1,7 +1,11 @@
 import asyncio
+from contextlib import nullcontext
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import cli as cli_mod
 from cli import HermesCLI
+from prompt_toolkit.keys import Keys
 
 
 class _FakeBuffer:
@@ -78,3 +82,47 @@ def test_run_radio_shortcut_action_dispatches_skip_pause_volume_and_mute():
         assert cli._run_radio_shortcut_action("mute") == "Muted"
 
     assert radio.calls == ["pause", "skip", ("volume", 5), ("volume", -5), "mute"]
+
+
+class _FakeThread:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def start(self):
+        pass
+
+
+class _CaptureApplication:
+    def __init__(self, *args, **kwargs):
+        self.key_bindings = kwargs["key_bindings"]
+        self.is_running = False
+
+    def run(self):
+        return None
+
+    def invalidate(self):
+        pass
+
+    def exit(self):
+        pass
+
+
+def test_escape_exits_radio_control_mode():
+    shell = HermesCLI(compact=True, max_turns=1)
+    shell.show_banner = lambda: None
+    shell._print_exit_summary = lambda: None
+
+    with patch.object(cli_mod, "Application", _CaptureApplication), \
+         patch.object(cli_mod, "patch_stdout", lambda *args, **kwargs: nullcontext()), \
+         patch.object(cli_mod.threading, "Thread", _FakeThread), \
+         patch.object(cli_mod.atexit, "register", lambda *args, **kwargs: None):
+        shell.run()
+
+    shell._radio_control_mode = True
+    bindings = shell._app.key_bindings.get_bindings_for_keys((Keys.Escape,))
+
+    for binding in bindings:
+        if binding.filter():
+            binding.handler(SimpleNamespace(app=_FakeApp()))
+
+    assert shell._radio_control_mode is False
