@@ -1311,6 +1311,33 @@ class HermesCLI:
         except ImportError:
             return False
 
+    def _can_use_radio_transport_shortcuts(self) -> bool:
+        """Radio transport shortcuts stay available even while the agent is working."""
+        return self._can_toggle_radio_expanded()
+
+    def _run_radio_shortcut_action(self, action: str) -> Optional[str]:
+        """Dispatch a keyboard radio shortcut and return the status text."""
+        if not self._can_use_radio_transport_shortcuts():
+            return None
+        try:
+            from radio.player import HermesRadio
+            from tools.radio_tool import _run_radio_async as _run
+        except ImportError:
+            return None
+
+        radio = HermesRadio.get()
+        if action == "pause":
+            return _run(radio.toggle_pause())
+        if action == "skip":
+            return _run(radio.skip())
+        if action == "volume_up":
+            return _run(radio.adjust_volume(5))
+        if action == "volume_down":
+            return _run(radio.adjust_volume(-5))
+        if action == "mute":
+            return _run(radio.toggle_mute())
+        return None
+
     def _normalize_model_for_provider(self, resolved_provider: str) -> bool:
         """Strip provider prefixes and swap the default model for Codex.
 
@@ -4361,6 +4388,32 @@ class HermesCLI:
             except ImportError:
                 pass
 
+        @kb.add(' ', filter=Condition(lambda: self._can_use_radio_transport_shortcuts()))
+        def radio_toggle_pause_shortcut(event):
+            if self._run_radio_shortcut_action("pause"):
+                event.app.invalidate()
+
+        @kb.add('n', filter=Condition(lambda: self._can_use_radio_transport_shortcuts()))
+        def radio_skip_shortcut(event):
+            if self._run_radio_shortcut_action("skip"):
+                event.app.invalidate()
+
+        @kb.add('m', filter=Condition(lambda: self._can_use_radio_transport_shortcuts()))
+        def radio_toggle_mute_shortcut(event):
+            if self._run_radio_shortcut_action("mute"):
+                event.app.invalidate()
+
+        @kb.add('-', filter=Condition(lambda: self._can_use_radio_transport_shortcuts()))
+        def radio_volume_down_shortcut(event):
+            if self._run_radio_shortcut_action("volume_down"):
+                event.app.invalidate()
+
+        @kb.add('=', filter=Condition(lambda: self._can_use_radio_transport_shortcuts()))
+        @kb.add('+', filter=Condition(lambda: self._can_use_radio_transport_shortcuts()))
+        def radio_volume_up_shortcut(event):
+            if self._run_radio_shortcut_action("volume_up"):
+                event.app.invalidate()
+
         # --- History navigation: up/down browse history in normal input mode ---
         # The TextArea is multiline, so by default up/down only move the cursor.
         # Buffer.auto_up/auto_down handle both: cursor movement when multi-line,
@@ -5063,6 +5116,10 @@ class HermesCLI:
             'radio-menu-off': f'{_rskin.get_color("session_border", "#484f58")}',
             # Radio mini player (skin-aware)
             'radio-bars': f'{_rskin.get_color("ui_accent", "#bc8cff")}',
+            **{
+                f'radio-bars-grad-{i}': color
+                for i, color in enumerate(_build_radio_gradient_colors(_rskin, steps=6))
+            },
             'radio-title': f'{_rskin.get_color("banner_text", "#e6edf3")} bold',
             'radio-title-dim': f'{_rskin.get_color("banner_text", "#c9d1d9")}',
             'radio-label': f'{_rskin.get_color("ui_accent", "#7eb8f6")} bold',
