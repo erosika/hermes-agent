@@ -243,14 +243,29 @@ def get_mini_player_text() -> List[Tuple[str, str]]:
     # Volume
     fragments.append(("class:radio-vol", f"  vol {int(now.volume)}"))
 
+    # Progress bar (second line)
+    fragments.append(("", "\n"))
+    if now.duration and now.duration > 0 and now.position is not None:
+        bar_width = 52  # characters for progress bar
+        progress = max(0.0, min(1.0, now.position / now.duration))
+        filled = int(progress * bar_width)
+        remaining = bar_width - filled
+        fragments.append(("", "  "))  # left margin to match bars
+        fragments.append(("class:radio-progress", "\u2501" * filled + "\u2578"))
+        fragments.append(("class:radio-progress-bg", "\u2500" * max(0, remaining - 1)))
+    else:
+        # Streaming / unknown duration -- show a subtle line
+        fragments.append(("", "  "))
+        fragments.append(("class:radio-progress-bg", "\u2500" * 52))
+
     return fragments
 
 
 def get_mini_player_height() -> int:
-    """Return 1 when radio is active, 0 otherwise."""
+    """Return 2 when radio is active (now-playing + progress bar), 0 otherwise."""
     try:
         from radio.player import HermesRadio
-        return 1 if HermesRadio.active() else 0
+        return 2 if HermesRadio.active() else 0
     except Exception:
         return 0
 
@@ -262,7 +277,7 @@ def _format_time(seconds: float) -> str:
     return f"{m}:{s:02d}"
 
 
-# Style tokens for the mini player
+# Style tokens for the mini player (fallback -- cli.py overrides with skin colors)
 MINI_PLAYER_STYLES = {
     "radio-bars": "#7eb8f6",
     "radio-title": "#e6edf3 bold",
@@ -270,4 +285,6 @@ MINI_PLAYER_STYLES = {
     "radio-station": "#7ee6a8",
     "radio-time": "#6e7681",
     "radio-vol": "#484f58",
+    "radio-progress": "#7eb8f6",
+    "radio-progress-bg": "#21262d",
 }
