@@ -297,22 +297,35 @@ def _get_mini_text() -> List[Tuple[str, str]]:
     # Volume
     fragments.append(("class:radio-vol", f"  vol {int(now.volume)}"))
 
-    # Progress bar (second line)
+    # Check if radio control mode is active
+    control_mode = False
+    try:
+        # Import here to avoid circular dependency
+        import radio.mini_player as _self_mod
+        control_mode = getattr(_self_mod, '_control_mode_active', False)
+    except Exception:
+        pass
+
+    # Second line: control hints (when in control mode) or progress bar
     fragments.append(("", "\n"))
-    if now.duration and now.duration > 0 and now.position is not None:
-        bar_width = 52  # characters for progress bar
+    if control_mode:
+        fragments.append(("class:radio-control", "  Spc pause  n skip  m mute  -/+ vol  Tab expand  Esc exit"))
+    elif now.duration and now.duration > 0 and now.position is not None:
+        bar_width = 52
         progress = max(0.0, min(1.0, now.position / now.duration))
         filled = int(progress * bar_width)
         remaining = bar_width - filled
-        fragments.append(("", "  "))  # left margin to match bars
+        fragments.append(("", "  "))
         fragments.append(("class:radio-progress", "\u2501" * filled + "\u2578"))
         fragments.append(("class:radio-progress-bg", "\u2500" * max(0, remaining - 1)))
     else:
-        # Streaming / unknown duration -- show a subtle line
         fragments.append(("", "  "))
         fragments.append(("class:radio-progress-bg", "\u2500" * 52))
 
     return fragments
+
+# Module-level flag set by cli.py when control mode is active
+_control_mode_active = False
 
 
 # -- Expanded display mode --------------------------------------------------

@@ -4146,6 +4146,7 @@ class HermesCLI:
 
         # Radio menu state (ConditionalContainer-driven, like clarify/approval)
         self._radio_menu_state = None  # RadioMenuState when active
+        self._radio_control_mode = False  # modal transport control mode
 
         # Slash command loading state
         self._command_running = False
@@ -4378,41 +4379,78 @@ class HermesCLI:
                 self._radio_menu_state.cancel()
                 event.app.invalidate()
 
-        # Toggle expanded radio display (Shift+V, only when prompt is empty)
-        @kb.add('V', filter=Condition(lambda: self._can_toggle_radio_expanded()))
-        def radio_toggle_expanded(event):
+        # --- Radio control mode (modal) ---
+        # Escape+R toggles into/out of radio control mode.
+        # While in control mode, single keys drive the radio.
+        # Escape, Ctrl+C, or Escape+R again exits control mode.
+        _radio_control = Condition(
+            lambda: getattr(self, '_radio_control_mode', False)
+        )
+        _no_modal = Condition(
+            lambda: not self._clarify_state and not self._approval_state
+            and not self._sudo_state and not self._secret_state
+            and self._radio_menu_state is None
+        )
+
+        def _set_control_mode(active: bool):
+            self._radio_control_mode = active
+            try:
+                import radio.mini_player as _mp
+                _mp._control_mode_active = active
+            except ImportError:
+                pass
+
+        @kb.add('escape', 'r', filter=_no_modal)
+        def radio_control_toggle(event):
+            try:
+                from radio.player import HermesRadio
+                if not HermesRadio.active():
+                    return
+            except ImportError:
+                return
+            _set_control_mode(not self._radio_control_mode)
+            event.app.invalidate()
+
+        @kb.add('escape', filter=_radio_control)
+        @kb.add('c-c', filter=_radio_control)
+        def radio_control_exit(event):
+            _set_control_mode(False)
+            event.app.invalidate()
+
+        @kb.add(' ', filter=_radio_control)
+        def rc_pause(event):
+            self._run_radio_shortcut_action("pause")
+            event.app.invalidate()
+
+        @kb.add('n', filter=_radio_control)
+        def rc_skip(event):
+            self._run_radio_shortcut_action("skip")
+            event.app.invalidate()
+
+        @kb.add('m', filter=_radio_control)
+        def rc_mute(event):
+            self._run_radio_shortcut_action("mute")
+            event.app.invalidate()
+
+        @kb.add('-', filter=_radio_control)
+        def rc_vol_down(event):
+            self._run_radio_shortcut_action("volume_down")
+            event.app.invalidate()
+
+        @kb.add('=', filter=_radio_control)
+        @kb.add('+', filter=_radio_control)
+        def rc_vol_up(event):
+            self._run_radio_shortcut_action("volume_up")
+            event.app.invalidate()
+
+        @kb.add('tab', filter=_radio_control)
+        def rc_expand(event):
             try:
                 from radio.mini_player import toggle_expanded
                 toggle_expanded()
                 event.app.invalidate()
             except ImportError:
                 pass
-
-        @kb.add(' ', filter=Condition(lambda: self._can_use_radio_transport_shortcuts()))
-        def radio_toggle_pause_shortcut(event):
-            if self._run_radio_shortcut_action("pause"):
-                event.app.invalidate()
-
-        @kb.add('n', filter=Condition(lambda: self._can_use_radio_transport_shortcuts()))
-        def radio_skip_shortcut(event):
-            if self._run_radio_shortcut_action("skip"):
-                event.app.invalidate()
-
-        @kb.add('m', filter=Condition(lambda: self._can_use_radio_transport_shortcuts()))
-        def radio_toggle_mute_shortcut(event):
-            if self._run_radio_shortcut_action("mute"):
-                event.app.invalidate()
-
-        @kb.add('-', filter=Condition(lambda: self._can_use_radio_transport_shortcuts()))
-        def radio_volume_down_shortcut(event):
-            if self._run_radio_shortcut_action("volume_down"):
-                event.app.invalidate()
-
-        @kb.add('=', filter=Condition(lambda: self._can_use_radio_transport_shortcuts()))
-        @kb.add('+', filter=Condition(lambda: self._can_use_radio_transport_shortcuts()))
-        def radio_volume_up_shortcut(event):
-            if self._run_radio_shortcut_action("volume_up"):
-                event.app.invalidate()
 
         # --- History navigation: up/down browse history in normal input mode ---
         # The TextArea is multiline, so by default up/down only move the cursor.
@@ -5130,6 +5168,7 @@ class HermesCLI:
             'radio-border': f'{_rskin.get_color("session_border", "#21262d")}',
             'radio-progress': f'{_rskin.get_color("ui_accent", "#7eb8f6")}',
             'radio-progress-bg': f'{_rskin.get_color("banner_dim", "#21262d")}',
+            'radio-control': f'{_rskin.get_color("ui_ok", "#7ee6a8")}',
         })
         
         # Create the application
