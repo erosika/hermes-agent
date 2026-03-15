@@ -5054,11 +5054,12 @@ class HermesCLI:
                 else:
                     # Refresh mini player when radio is active
                     # (reads cached state only -- no async calls)
+                    # Uses 0.5s min_interval to avoid border flicker
                     try:
                         from radio.player import HermesRadio
                         if HermesRadio.active() and self._app:
-                            self._invalidate(min_interval=0.25)
-                            _time.sleep(0.3)  # match bar animation slot
+                            self._invalidate(min_interval=0.5)
+                            _time.sleep(0.5)
                             continue
                     except ImportError:
                         pass
