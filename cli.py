@@ -4422,6 +4422,7 @@ class HermesCLI:
 
         @kb.add('c-c', filter=_radio_control)
         @kb.add('q', filter=_radio_control)
+        @kb.add('escape', filter=_radio_control)
         def radio_control_exit(event):
             _set_control_mode(False)
             event.app.invalidate()
@@ -5157,6 +5158,7 @@ class HermesCLI:
             'approval-selected': '#FFD700 bold',
             # Radio menu (skin-aware)
             'radio-menu-title': f'{_rskin.get_color("banner_text", "#e6edf3")} bold',
+            'radio-menu-accent': f'{_rskin.get_color("ui_accent", "#7eb8f6")} bold underline',
             'radio-menu-header': f'{_rskin.get_color("banner_accent", "#FFBF00")} bold',
             'radio-menu-border': f'{_rskin.get_color("banner_dim", "#21262d")}',
             'radio-menu-dim': f'{_rskin.get_color("session_border", "#484f58")}',

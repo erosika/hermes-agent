@@ -365,7 +365,8 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
     vol_str = f"vol {int(now.volume)}"
     pad = W - 4 - 12 - len(vol_str)
     fragments.append(("class:radio-border", "  \u2502 "))
-    fragments.append(("class:radio-label", "HERMES RADIO"))
+    fragments.append(("class:radio-label", "HERMES RADI"))
+    fragments.append(("class:radio-control", "O"))
     fragments.append(("", " " * max(1, pad)))
     fragments.append(("class:radio-vol", vol_str))
     fragments.append(("class:radio-border", " \u2502\n"))

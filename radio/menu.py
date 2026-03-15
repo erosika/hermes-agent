@@ -289,15 +289,17 @@ def render_menu(state: RadioMenuState) -> List[Tuple[str, str]]:
     # ╭─ top border ─╮
     fragments.append(("class:radio-menu-border", f"  {BOX_TL}{BOX_H * (MENU_WIDTH - 2)}{BOX_TR}\n"))
 
-    # │  HERMES RADIO  ...keybinds...  │
-    title_line = "HERMES RADIO"
+    # │  HERMES RADI(Ctrl+O)  ...keybinds...  │
+    title_text = "HERMES RADI"  # before the O
+    title_len = len("HERMES RADIO")  # for spacing calc
     keys_hint = "\u2191\u2193 nav  Spc toggle  \u21b5 select  q close"
-    gap = INNER_WIDTH - len(title_line) - len(keys_hint)
+    gap = INNER_WIDTH - title_len - len(keys_hint)
     if gap < 2:
         gap = 2
-        keys_hint = keys_hint[:INNER_WIDTH - len(title_line) - gap]
+        keys_hint = keys_hint[:INNER_WIDTH - title_len - gap]
     fragments.append(("class:radio-menu-border", f"  {BOX_V} "))
-    fragments.append(("class:radio-menu-title", title_line))
+    fragments.append(("class:radio-menu-title", title_text))
+    fragments.append(("class:radio-menu-accent", "O"))
     fragments.append(("", " " * gap))
     fragments.append(("class:radio-menu-dim", keys_hint))
     fragments.append(("class:radio-menu-border", f" {BOX_V}\n"))
