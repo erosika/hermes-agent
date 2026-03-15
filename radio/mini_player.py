@@ -3,10 +3,9 @@
 Provides a prompt_toolkit FormattedTextControl that renders a compact
 now-playing bar below the input area.  Only visible when the radio is active.
 
-The visualizer uses playback-position-seeded noise with smooth attack/decay
-and peak hold, giving the appearance of audio-reactive bars.  Different
-tracks produce different patterns because the seed incorporates the track
-title.
+Visualizer uses Unicode braille characters (U+2800-U+28FF) for 2x4 dot
+resolution per character cell.  Each frequency band is one column rendered
+with braille dots, giving smooth sub-character animation.
 """
 
 import hashlib
@@ -14,16 +13,67 @@ import math
 import time
 from typing import List, Tuple
 
-# Block elements: 8 height levels
+# -- Braille rendering engine -----------------------------------------------
+# Each braille character is a 2x4 grid of dots.  We use both columns
+# (full width) for each bar, filling from bottom up.
+
+# Both columns, bottom-to-top row order
+_BRAILLE_ROWS = [
+    0x40 | 0x80,  # row 3 (bottom): dots 7+8
+    0x04 | 0x20,  # row 2: dots 3+6
+    0x02 | 0x10,  # row 1: dots 2+5
+    0x01 | 0x08,  # row 0 (top): dots 1+4
+]
+
+_BRAILLE_BASE = 0x2800
+
+# Block elements fallback
 _BLOCKS = " \u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
-_NUM_BARS = 12
+
+_NUM_BARS = 16  # more bars for braille (each is 2px wide = 1 char)
 
 # State for smooth animation (persists between renders)
-_bar_levels = [0.0] * _NUM_BARS   # current smoothed level (0.0-1.0)
-_peak_levels = [0.0] * _NUM_BARS  # peak hold level
-_peak_decay = [0.0] * _NUM_BARS   # time since peak was set
+_bar_levels = [0.0] * _NUM_BARS
+_peak_levels = [0.0] * _NUM_BARS
+_peak_decay = [0.0] * _NUM_BARS
 _last_title = ""
 _last_render = 0.0
+
+
+def _braille_bar(height: float) -> str:
+    """Convert a 0.0-1.0 height to a single braille character.
+
+    Uses 4 vertical levels within one character (bottom-up fill).
+    """
+    filled = round(height * 4)
+    filled = max(0, min(4, filled))
+    code = 0
+    for i in range(filled):
+        code |= _BRAILLE_ROWS[i]
+    return chr(_BRAILLE_BASE + code)
+
+
+def _braille_bar_2row(height: float) -> List[str]:
+    """Convert a 0.0-1.0 height to two braille characters (top, bottom).
+
+    8 vertical levels across 2 characters stacked.
+    """
+    filled = round(height * 8)
+    filled = max(0, min(8, filled))
+
+    # Bottom character: first 4 rows
+    bot_fill = min(filled, 4)
+    bot_code = 0
+    for i in range(bot_fill):
+        bot_code |= _BRAILLE_ROWS[i]
+
+    # Top character: remaining rows
+    top_fill = max(0, filled - 4)
+    top_code = 0
+    for i in range(top_fill):
+        top_code |= _BRAILLE_ROWS[i]
+
+    return [chr(_BRAILLE_BASE + top_code), chr(_BRAILLE_BASE + bot_code)]
 
 
 def _noise(seed: int, idx: int) -> float:
@@ -44,11 +94,7 @@ def _generate_bars(position: float, title: str, paused: bool) -> str:
         for i in range(_NUM_BARS):
             _bar_levels[i] *= 0.85
             _peak_levels[i] *= 0.9
-        bars = []
-        for i in range(_NUM_BARS):
-            level = int(_bar_levels[i] * 7)
-            bars.append(_BLOCKS[max(0, min(8, level))])
-        return "".join(bars)
+        return "".join(_braille_bar(_bar_levels[i]) for i in range(_NUM_BARS))
 
     # Try real audio levels first
     try:
@@ -118,14 +164,8 @@ def _generate_bars(position: float, title: str, paused: bool) -> str:
             if _peak_decay[i] > 0.8:  # hold for 0.8s then decay
                 _peak_levels[i] *= 0.92
 
-    # Render bars
-    bars = []
-    for i in range(_NUM_BARS):
-        level = int(_bar_levels[i] * 8)
-        level = max(1, min(8, level))  # at least 1 when playing
-        bars.append(_BLOCKS[level])
-
-    return "".join(bars)
+    # Render as braille
+    return "".join(_braille_bar(_bar_levels[i]) for i in range(_NUM_BARS))
 
 
 def _render_real_levels(levels: List[float]) -> str:
@@ -169,13 +209,7 @@ def _render_real_levels(levels: List[float]) -> str:
         else:
             _bar_levels[i] += (val - _bar_levels[i]) * min(1.0, decay * dt)
 
-    bars = []
-    for i in range(_NUM_BARS):
-        level = int(_bar_levels[i] * 8)
-        level = max(1, min(8, level))
-        bars.append(_BLOCKS[level])
-
-    return "".join(bars)
+    return "".join(_braille_bar(_bar_levels[i]) for i in range(_NUM_BARS))
 
 
 def _get_mini_text() -> List[Tuple[str, str]]:
