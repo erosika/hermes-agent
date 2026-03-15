@@ -245,8 +245,9 @@ class HermesRadio:
         if self._mic_break_active:
             await self._abort_mic_break()
         if self._source_mode == SourceMode.CRATE:
-            # The crate loop will pick the next track
-            await self._primary.stop()
+            # Signal the crate loop to advance via the skip event
+            if hasattr(self, '_skip_event') and self._skip_event:
+                self._skip_event.set()
             return "Skipping..."
         else:
             try:
@@ -382,22 +383,38 @@ class HermesRadio:
                 # Pre-fetch the next track while current plays
                 prefetch_task = asyncio.create_task(self._dig_track())
 
-                # Wait for the current track to end
+                # Wait for track to end naturally (eof) or user skip.
+                # Two signals: end-file from mpv, or _skip_event from skip().
                 end_event = asyncio.Event()
+                self._skip_event = asyncio.Event()
+                load_time = time.monotonic()
 
                 def on_end(data):
                     reason = data.get("reason", "")
-                    if reason in ("eof", "stop", "error"):
-                        end_event.set()
+                    if reason not in ("eof", "error"):
+                        return  # ignore "stop" -- only natural endings
+                    # Debounce: ignore events within 2s of load (loadfile cascade)
+                    if time.monotonic() - load_time < 2.0:
+                        return
+                    end_event.set()
 
                 self._primary.on("end-file", on_end)
 
+                # Wait for either natural end or skip
                 try:
-                    await end_event.wait()
+                    done, pending = await asyncio.wait(
+                        [
+                            asyncio.create_task(end_event.wait()),
+                            asyncio.create_task(self._skip_event.wait()),
+                        ],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for task in pending:
+                        task.cancel()
                 finally:
-                    # Remove this specific listener
                     if on_end in self._primary._event_callbacks.get("end-file", []):
                         self._primary._event_callbacks["end-file"].remove(on_end)
+                    self._skip_event = None
 
                 if not self._running or self._source_mode != SourceMode.CRATE:
                     prefetch_task.cancel()
