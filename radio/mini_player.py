@@ -178,8 +178,8 @@ def _render_real_levels(levels: List[float]) -> str:
     return "".join(bars)
 
 
-def get_mini_player_text() -> List[Tuple[str, str]]:
-    """Return styled text fragments for the mini player bar.
+def _get_mini_text() -> List[Tuple[str, str]]:
+    """Return styled text fragments for the compact mini player bar.
 
     Returns an empty list when the radio is inactive (widget collapses to 0 height).
     """
@@ -261,13 +261,236 @@ def get_mini_player_text() -> List[Tuple[str, str]]:
     return fragments
 
 
-def get_mini_player_height() -> int:
-    """Return 2 when radio is active (now-playing + progress bar), 0 otherwise."""
+# -- Expanded display mode --------------------------------------------------
+
+_expanded = False  # toggled by 'v' key binding in cli.py
+
+_BARS_EXPANDED = 32  # wider visualizer in expanded mode
+_bar_levels_exp = [0.0] * _BARS_EXPANDED
+
+
+def toggle_expanded() -> bool:
+    """Toggle between mini and expanded display. Returns new state."""
+    global _expanded
+    _expanded = not _expanded
+    return _expanded
+
+
+def get_expanded_player_text() -> List[Tuple[str, str]]:
+    """Return styled fragments for the expanded now-playing display."""
     try:
         from radio.player import HermesRadio
-        return 2 if HermesRadio.active() else 0
+        if not HermesRadio.active():
+            return []
+        now = HermesRadio.get().now_playing()
+        if not now.active:
+            return []
+    except Exception:
+        return []
+
+    fragments: List[Tuple[str, str]] = []
+    W = 58  # display width
+
+    # Top border
+    fragments.append(("class:radio-border", f"  \u256d{'\u2500' * (W - 2)}\u256e\n"))
+
+    # Row 1: HERMES RADIO + volume
+    vol_str = f"vol {int(now.volume)}"
+    pad = W - 4 - 12 - len(vol_str)
+    fragments.append(("class:radio-border", "  \u2502 "))
+    fragments.append(("class:radio-label", "HERMES RADIO"))
+    fragments.append(("", " " * max(1, pad)))
+    fragments.append(("class:radio-vol", vol_str))
+    fragments.append(("class:radio-border", " \u2502\n"))
+
+    # Row 2: separator
+    fragments.append(("class:radio-border", f"  \u251c{'\u2500' * (W - 2)}\u2524\n"))
+
+    # Row 3: empty line for breathing room
+    fragments.append(("class:radio-border", "  \u2502"))
+    fragments.append(("", " " * (W - 2)))
+    fragments.append(("class:radio-border", "\u2502\n"))
+
+    # Row 4-6: large visualizer (3 rows of bars)
+    bars_str = _generate_bars_expanded(
+        position=now.position or 0.0,
+        title=f"{now.artist}-{now.title}",
+        paused=now.paused,
+    )
+    for row in bars_str:
+        pad = W - 4 - len(row)
+        fragments.append(("class:radio-border", "  \u2502 "))
+        fragments.append(("class:radio-bars", row))
+        fragments.append(("", " " * max(0, pad + 1)))
+        fragments.append(("class:radio-border", "\u2502\n"))
+
+    # Row 7: empty
+    fragments.append(("class:radio-border", "  \u2502"))
+    fragments.append(("", " " * (W - 2)))
+    fragments.append(("class:radio-border", "\u2502\n"))
+
+    # Row 8: Artist
+    artist = now.artist if now.artist and now.artist != "Unknown" else ""
+    if artist:
+        aline = artist[:W - 4]
+        pad = W - 4 - len(aline)
+        fragments.append(("class:radio-border", "  \u2502 "))
+        fragments.append(("class:radio-title", aline))
+        fragments.append(("", " " * max(0, pad + 1)))
+        fragments.append(("class:radio-border", "\u2502\n"))
+
+    # Row 9: Title
+    title = now.title or now.station_name or "..."
+    tline = title[:W - 4]
+    pad = W - 4 - len(tline)
+    fragments.append(("class:radio-border", "  \u2502 "))
+    fragments.append(("class:radio-title-dim", tline))
+    fragments.append(("", " " * max(0, pad + 1)))
+    fragments.append(("class:radio-border", "\u2502\n"))
+
+    # Row 10: Tags / station info
+    tags = ""
+    if now.source_mode == "crate":
+        parts = []
+        if now.decade:
+            parts.append(f"{now.decade}s")
+        if now.country:
+            parts.append(now.country)
+        if now.mood:
+            parts.append(now.mood)
+        tags = " \u00b7 ".join(parts)
+    elif now.source_mode == "stream" and now.station_name:
+        tags = now.station_name
+
+    if tags:
+        tline = tags[:W - 4]
+        pad = W - 4 - len(tline)
+        fragments.append(("class:radio-border", "  \u2502 "))
+        fragments.append(("class:radio-tags", tline))
+        fragments.append(("", " " * max(0, pad + 1)))
+        fragments.append(("class:radio-border", "\u2502\n"))
+
+    # Row 11: empty
+    fragments.append(("class:radio-border", "  \u2502"))
+    fragments.append(("", " " * (W - 2)))
+    fragments.append(("class:radio-border", "\u2502\n"))
+
+    # Row 12: Progress bar + time
+    bar_w = W - 18  # leave room for time display
+    if now.duration and now.duration > 0 and now.position is not None:
+        progress = max(0.0, min(1.0, now.position / now.duration))
+        filled = int(progress * bar_w)
+        remaining = bar_w - filled
+        pos_fmt = _format_time(now.position)
+        dur_fmt = _format_time(now.duration)
+        time_str = f" {pos_fmt} / {dur_fmt}"
+
+        fragments.append(("class:radio-border", "  \u2502 "))
+        fragments.append(("class:radio-progress", "\u2501" * filled + "\u2578"))
+        fragments.append(("class:radio-progress-bg", "\u2500" * max(0, remaining - 1)))
+        fragments.append(("class:radio-time", time_str))
+        pad = W - 4 - bar_w - len(time_str)
+        fragments.append(("", " " * max(0, pad + 1)))
+        fragments.append(("class:radio-border", "\u2502\n"))
+    else:
+        fragments.append(("class:radio-border", "  \u2502 "))
+        fragments.append(("class:radio-progress-bg", "\u2500" * bar_w))
+        fragments.append(("class:radio-time", "  \u221e "))
+        pad = W - 4 - bar_w - 4
+        fragments.append(("", " " * max(0, pad + 1)))
+        fragments.append(("class:radio-border", "\u2502\n"))
+
+    # Bottom border
+    fragments.append(("class:radio-border", f"  \u2570{'\u2500' * (W - 2)}\u256f\n"))
+
+    return fragments
+
+
+def _generate_bars_expanded(position: float, title: str, paused: bool) -> List[str]:
+    """Generate 3 rows of wide visualizer bars for expanded mode."""
+    global _bar_levels_exp
+
+    n = _BARS_EXPANDED
+
+    # Get real or synthetic levels
+    levels = [0.0] * n
+    try:
+        from radio.level_meter import get_levels, is_active
+        if is_active():
+            raw = get_levels(n)
+            if len(raw) >= 3:
+                for i in range(n):
+                    idx = min(i, len(raw) - 1)
+                    levels[i] = raw[idx]
+                    # Add jitter for visual spread
+                    j = _noise(int(time.time() * 3), i) * 0.12
+                    levels[i] = max(0.0, min(1.0, levels[i] + j - 0.06))
+    except ImportError:
+        pass
+
+    # If no real levels, use position-seeded noise
+    if all(l == 0.0 for l in levels) and not paused:
+        pos = position if position and position > 0 else time.time()
+        title_seed = int(hashlib.md5((title or "x").encode()).hexdigest()[:8], 16)
+        for i in range(n):
+            freq = 1.2 + i * 0.5
+            phase = title_seed + i * 137
+            val = _noise(int(pos * freq) + phase, i) * 0.5
+            val += _noise(int(pos * freq * 2.7) + phase + 1000, i) * 0.3
+            val += _noise(int(pos * freq * 6.1) + phase + 2000, i) * 0.2
+            center = 0.6 + 0.4 * (1.0 - abs(i - n / 2) / (n / 2))
+            energy = 0.6 + 0.4 * math.sin(pos * 0.4 + title_seed * 0.001)
+            levels[i] = val * center * energy * 1.6 + 0.15
+
+    if paused:
+        for i in range(n):
+            _bar_levels_exp[i] *= 0.85
+    else:
+        dt = 0.3
+        for i in range(n):
+            val = levels[i]
+            if val > _bar_levels_exp[i]:
+                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, 12.0 * dt)
+            else:
+                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, 4.0 * dt)
+
+    # Render 3 rows (top, mid, bottom) using block characters
+    # Each bar has height 0-24 (3 rows x 8 levels)
+    rows = ["", "", ""]
+    for i in range(n):
+        h = int(_bar_levels_exp[i] * 24)
+        h = max(0, min(24, h))
+
+        # Bottom row: 0-8
+        bot = min(8, h)
+        # Mid row: 8-16
+        mid = min(8, max(0, h - 8))
+        # Top row: 16-24
+        top = min(8, max(0, h - 16))
+
+        rows[0] += _BLOCKS[top]
+        rows[1] += _BLOCKS[mid]
+        rows[2] += _BLOCKS[bot]
+
+    return rows  # top, mid, bottom
+
+
+def get_mini_player_height() -> int:
+    """Return display height: 0 (inactive), 2 (mini), or 15 (expanded)."""
+    try:
+        from radio.player import HermesRadio
+        if not HermesRadio.active():
+            return 0
+        return 15 if _expanded else 2
     except Exception:
         return 0
+
+
+def get_mini_player_text() -> List[Tuple[str, str]]:
+    """Dispatch to mini or expanded renderer based on mode."""
+    if _expanded:
+        return get_expanded_player_text()
+    return _get_mini_text()
 
 
 def _format_time(seconds: float) -> str:
@@ -277,14 +500,17 @@ def _format_time(seconds: float) -> str:
     return f"{m}:{s:02d}"
 
 
-# Style tokens for the mini player (fallback -- cli.py overrides with skin colors)
+# Style tokens
 MINI_PLAYER_STYLES = {
-    "radio-bars": "#7eb8f6",
+    "radio-bars": "#bc8cff",
     "radio-title": "#e6edf3 bold",
+    "radio-title-dim": "#c9d1d9",
+    "radio-label": "#7eb8f6 bold",
     "radio-tags": "#6e7681",
     "radio-station": "#7ee6a8",
     "radio-time": "#6e7681",
     "radio-vol": "#484f58",
     "radio-progress": "#7eb8f6",
     "radio-progress-bg": "#21262d",
+    "radio-border": "#21262d",
 }

@@ -4322,6 +4322,18 @@ class HermesCLI:
                 self._radio_menu_state.cancel()
                 event.app.invalidate()
 
+        # Toggle expanded radio display (v key when no menu is open)
+        @kb.add('v', filter=Condition(lambda: not self._radio_menu_state and not self._clarify_state and not self._approval_state and not self._sudo_state and not self._secret_state))
+        def radio_toggle_expanded(event):
+            try:
+                from radio.player import HermesRadio
+                if HermesRadio.active():
+                    from radio.mini_player import toggle_expanded
+                    toggle_expanded()
+                    event.app.invalidate()
+            except ImportError:
+                pass
+
         # --- History navigation: up/down browse history in normal input mode ---
         # The TextArea is multiline, so by default up/down only move the cursor.
         # Buffer.auto_up/auto_down handle both: cursor movement when multi-line,
@@ -5023,12 +5035,15 @@ class HermesCLI:
             'radio-menu-on': f'{_rskin.get_color("ui_ok", "#7ee6a8")}',
             'radio-menu-off': f'{_rskin.get_color("session_border", "#484f58")}',
             # Radio mini player (skin-aware)
-            'radio-bars': f'{_rskin.get_color("ui_accent", "#7eb8f6")}',
+            'radio-bars': f'{_rskin.get_color("ui_accent", "#bc8cff")}',
             'radio-title': f'{_rskin.get_color("banner_text", "#e6edf3")} bold',
+            'radio-title-dim': f'{_rskin.get_color("banner_text", "#c9d1d9")}',
+            'radio-label': f'{_rskin.get_color("ui_accent", "#7eb8f6")} bold',
             'radio-tags': f'{_rskin.get_color("session_border", "#6e7681")}',
             'radio-station': f'{_rskin.get_color("ui_ok", "#7ee6a8")}',
             'radio-time': f'{_rskin.get_color("session_border", "#6e7681")}',
             'radio-vol': f'{_rskin.get_color("banner_dim", "#484f58")}',
+            'radio-border': f'{_rskin.get_color("session_border", "#21262d")}',
             'radio-progress': f'{_rskin.get_color("ui_accent", "#7eb8f6")}',
             'radio-progress-bg': f'{_rskin.get_color("banner_dim", "#21262d")}',
         })
