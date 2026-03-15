@@ -5165,7 +5165,14 @@ class HermesCLI:
             'radio-bars': f'{_rskin.get_color("ui_accent", "#bc8cff")}',
             **{
                 f'radio-bars-grad-{i}': color
-                for i, color in enumerate(_build_radio_gradient_colors(_rskin, steps=6))
+                for i, color in enumerate([
+                    f'{_rskin.get_color("ui_accent", "#7eb8f6")}',
+                    f'{_rskin.get_color("ui_accent", "#9b8cf6")}',
+                    f'{_rskin.get_color("ui_accent", "#bc8cff")}',
+                    f'{_rskin.get_color("ui_accent", "#d48cff")}',
+                    f'{_rskin.get_color("ui_accent", "#bc8cff")}',
+                    f'{_rskin.get_color("ui_accent", "#9b8cf6")}',
+                ])
             },
             'radio-title': f'{_rskin.get_color("banner_text", "#e6edf3")} bold',
             'radio-title-dim': f'{_rskin.get_color("banner_text", "#c9d1d9")}',
