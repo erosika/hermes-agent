@@ -1722,6 +1722,16 @@ class AIAgent:
             tool_guidance.append(SESSION_SEARCH_GUIDANCE)
         if "skill_manage" in self.valid_tool_names:
             tool_guidance.append(SKILLS_GUIDANCE)
+        if "radio_play" in self.valid_tool_names:
+            tool_guidance.append(
+                "You have a built-in radio player (Hermes Radio). "
+                "When the user asks to play music, listen to radio, hear songs, or dig for tracks, "
+                "use the radio_play tool -- NOT web_search or YouTube. "
+                "Use radio_pause to pause/resume, radio_skip to skip, radio_stop to stop, "
+                "radio_volume to adjust volume, radio_status to check what's playing. "
+                "Source 'crate' plays from Radiooooo (decades/countries/moods), "
+                "'somafm' for curated underground channels, 'stream' for any URL or station search."
+            )
         if tool_guidance:
             prompt_parts.append(" ".join(tool_guidance))
 
