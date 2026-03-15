@@ -464,6 +464,7 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
         fragments.append(("class:radio-border", "\u2502\n"))
 
     # Row 11: keyboard controls (context-aware)
+    is_stream = now.source_mode == "stream"
     if is_stream:
         controls = "Spc pause  m mute  r rec  -/+ vol  Tab size  Ctrl+O/q exit"
     else:
@@ -476,7 +477,6 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
     fragments.append(("class:radio-border", "\u2502\n"))
 
     # Row 12: Progress bar + time (crate dig only) or LIVE (streams)
-    is_stream = now.source_mode == "stream"
     bar_w = W - 18
     if not is_stream and now.duration and now.duration > 0 and now.position is not None:
         progress = max(0.0, min(1.0, now.position / now.duration))
