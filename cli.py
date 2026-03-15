@@ -4971,7 +4971,13 @@ class HermesCLI:
             ])
         )
         
-        # Style for the application
+        # Style for the application -- pull skin colors for radio
+        try:
+            from hermes_cli.skin_engine import get_active_skin as _get_rskin
+            _rskin = _get_rskin()
+        except Exception:
+            from hermes_cli.skin_engine import SkinConfig
+            _rskin = SkinConfig(name="default")
         style = PTStyle.from_dict({
             'input-area': '#FFF8DC',
             'placeholder': '#555555 italic',
@@ -5007,22 +5013,24 @@ class HermesCLI:
             'approval-cmd': '#AAAAAA italic',
             'approval-choice': '#AAAAAA',
             'approval-selected': '#FFD700 bold',
-            # Radio menu
-            'radio-menu-title': '#e6edf3 bold',
-            'radio-menu-header': '#CD7F32 bold',
-            'radio-menu-border': '#21262d',
-            'radio-menu-dim': '#484f58',
-            'radio-menu-item': '#c9d1d9',
-            'radio-menu-selected': '#7eb8f6 bold',
-            'radio-menu-on': '#7ee6a8',
-            'radio-menu-off': '#484f58',
-            # Radio mini player
-            'radio-bars': '#7eb8f6',
-            'radio-title': '#e6edf3 bold',
-            'radio-tags': '#6e7681',
-            'radio-station': '#7ee6a8',
-            'radio-time': '#6e7681',
-            'radio-vol': '#484f58',
+            # Radio menu (skin-aware)
+            'radio-menu-title': f'{_rskin.get_color("banner_text", "#e6edf3")} bold',
+            'radio-menu-header': f'{_rskin.get_color("banner_accent", "#FFBF00")} bold',
+            'radio-menu-border': f'{_rskin.get_color("banner_dim", "#21262d")}',
+            'radio-menu-dim': f'{_rskin.get_color("session_border", "#484f58")}',
+            'radio-menu-item': f'{_rskin.get_color("banner_text", "#c9d1d9")}',
+            'radio-menu-selected': f'{_rskin.get_color("ui_accent", "#7eb8f6")} bold',
+            'radio-menu-on': f'{_rskin.get_color("ui_ok", "#7ee6a8")}',
+            'radio-menu-off': f'{_rskin.get_color("session_border", "#484f58")}',
+            # Radio mini player (skin-aware)
+            'radio-bars': f'{_rskin.get_color("ui_accent", "#7eb8f6")}',
+            'radio-title': f'{_rskin.get_color("banner_text", "#e6edf3")} bold',
+            'radio-tags': f'{_rskin.get_color("session_border", "#6e7681")}',
+            'radio-station': f'{_rskin.get_color("ui_ok", "#7ee6a8")}',
+            'radio-time': f'{_rskin.get_color("session_border", "#6e7681")}',
+            'radio-vol': f'{_rskin.get_color("banner_dim", "#484f58")}',
+            'radio-progress': f'{_rskin.get_color("ui_accent", "#7eb8f6")}',
+            'radio-progress-bg': f'{_rskin.get_color("banner_dim", "#21262d")}',
         })
         
         # Create the application

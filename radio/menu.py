@@ -15,7 +15,20 @@ import threading
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 
-# -- Data model ------------------------------------------------------------
+# -- Box-drawing characters ---------------------------------------------------
+
+BOX_TL = "\u256d"  # ╭
+BOX_TR = "\u256e"  # ╮
+BOX_BL = "\u2570"  # ╰
+BOX_BR = "\u256f"  # ╯
+BOX_H  = "\u2500"  # ─
+BOX_V  = "\u2502"  # │
+
+TOGGLE_ON  = "\u25cf"  # ●
+TOGGLE_OFF = "\u25cb"  # ○
+
+
+# -- Data model ----------------------------------------------------------------
 
 class MenuItem:
     __slots__ = ("label", "sublabel", "action", "data",
@@ -194,27 +207,23 @@ def build_menu_items(
         items.append(MenuItem(label="Skip track", action="skip"))
         items.append(MenuItem(label="Stop radio", action="stop"))
 
-    # Decades
-    items.append(MenuItem(label="DECADES", is_header=True))
-    for decade in [1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020]:
-        items.append(MenuItem(label=f"{decade}s", is_toggle=True, toggled=decade in active_decades, toggle_key=f"decade:{decade}"))
-
-    # Moods
-    items.append(MenuItem(label="MOODS", is_header=True))
-    for mood, desc in [("weird", "the good stuff"), ("slow", "deep, contemplative"), ("fast", "upbeat, energetic")]:
-        items.append(MenuItem(label=mood, sublabel=desc, is_toggle=True, toggled=mood in active_moods, toggle_key=f"mood:{mood}"))
-
-    # Options
-    items.append(MenuItem(label="OPTIONS", is_header=True))
-    items.append(MenuItem(label="Mic breaks", sublabel="AI DJ commentary", is_toggle=True, toggled=mic_breaks, toggle_key="mic_breaks"))
-
-    # Crate dig
+    # Crate digger (with decades + moods nested inside)
     items.append(MenuItem(label="CRATE DIGGER", is_header=True))
     items.append(MenuItem(label="Dig (selected decades + moods)", sublabel="Radiooooo", action="crate"))
     items.append(MenuItem(label="Dig Japan", action="crate", data={"country": "JPN"}))
     items.append(MenuItem(label="Dig France", action="crate", data={"country": "FRA"}))
     items.append(MenuItem(label="Dig UK", action="crate", data={"country": "GBR"}))
     items.append(MenuItem(label="Dig USA", action="crate", data={"country": "USA"}))
+
+    # Decades (sub-section of crate digger)
+    items.append(MenuItem(label="DECADES", is_header=True))
+    for decade in [1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020]:
+        items.append(MenuItem(label=f"{decade}s", is_toggle=True, toggled=decade in active_decades, toggle_key=f"decade:{decade}"))
+
+    # Moods (sub-section of crate digger)
+    items.append(MenuItem(label="MOODS", is_header=True))
+    for mood, desc in [("weird", "the good stuff"), ("slow", "deep, contemplative"), ("fast", "upbeat, energetic")]:
+        items.append(MenuItem(label=mood, sublabel=desc, is_toggle=True, toggled=mood in active_moods, toggle_key=f"mood:{mood}"))
 
     # SomaFM
     items.append(MenuItem(label="SOMAFM", is_header=True))
@@ -233,7 +242,32 @@ def build_menu_items(
     items.append(MenuItem(label="Search Radio Browser", sublabel="45k+ stations", action="search_rb"))
     items.append(MenuItem(label="Search Radio Garden", sublabel="by city", action="search_rg"))
 
+    # Options
+    items.append(MenuItem(label="OPTIONS", is_header=True))
+    items.append(MenuItem(label="Mic breaks", sublabel="AI DJ commentary", is_toggle=True, toggled=mic_breaks, toggle_key="mic_breaks"))
+
     return items
+
+
+# -- Render helpers ------------------------------------------------------------
+
+MENU_WIDTH = 56
+INNER_WIDTH = MENU_WIDTH - 4  # inside borders: "│  " ... " │"
+
+
+def _section_header(label: str) -> str:
+    """Build an embedded section separator: ── LABEL ──────"""
+    pad = INNER_WIDTH - len(label) - 4  # 4 = "── " + " "
+    if pad < 2:
+        pad = 2
+    return f"{BOX_H}{BOX_H} {label} {BOX_H * pad}"
+
+
+def _pad_line(text: str, width: int = INNER_WIDTH) -> str:
+    """Pad text to fixed width, truncating if needed."""
+    if len(text) > width:
+        return text[:width - 1] + "\u2026"  # …
+    return text + " " * (width - len(text))
 
 
 # -- Render for FormattedTextControl ---------------------------------------
@@ -247,35 +281,44 @@ def render_menu(state: RadioMenuState) -> List[Tuple[str, str]]:
     cursor_abs = state.cursor_abs
     fragments: List[Tuple[str, str]] = []
 
-    # Header
-    fragments.append(("class:radio-menu-title", "  HERMES RADIO"))
-    fragments.append(("", "  "))
-    fragments.append(("class:radio-menu-dim", "\u2191\u2193 navigate  "))
-    fragments.append(("class:radio-menu-dim", "Space toggle  "))
-    fragments.append(("class:radio-menu-dim", "Enter select  "))
-    fragments.append(("class:radio-menu-dim", "Tab section  "))
-    fragments.append(("class:radio-menu-dim", "q close"))
-    fragments.append(("", "\n"))
-    fragments.append(("class:radio-menu-border", "  " + "\u2500" * 54 + "\n"))
+    # ╭─ top border ─╮
+    fragments.append(("class:radio-menu-border", f"  {BOX_TL}{BOX_H * (MENU_WIDTH - 2)}{BOX_TR}\n"))
+
+    # │  HERMES RADIO  ...keybinds...  │
+    title_line = "HERMES RADIO"
+    keys_hint = "\u2191\u2193 nav  Spc toggle  \u21b5 sel  Tab \u00a7  q close"
+    gap = INNER_WIDTH - len(title_line) - len(keys_hint)
+    if gap < 2:
+        gap = 2
+        keys_hint = keys_hint[:INNER_WIDTH - len(title_line) - gap]
+    fragments.append(("class:radio-menu-border", f"  {BOX_V} "))
+    fragments.append(("class:radio-menu-title", title_line))
+    fragments.append(("", " " * gap))
+    fragments.append(("class:radio-menu-dim", keys_hint))
+    fragments.append(("class:radio-menu-border", f" {BOX_V}\n"))
+
+    # ├─ separator ─┤
+    fragments.append(("class:radio-menu-border", f"  {BOX_V}{BOX_H * (MENU_WIDTH - 2)}{BOX_V}\n"))
 
     # Viewport calculation -- keep cursor centered in view
     visible = VISIBLE_ROWS
     vp = state.viewport_start
 
-    # Ensure cursor is always visible with 2 lines of margin
     margin = 2
     if cursor_abs < vp + margin:
         vp = max(0, cursor_abs - margin)
     elif cursor_abs >= vp + visible - margin:
         vp = cursor_abs - visible + margin + 1
 
-    # Clamp
     vp = max(0, min(len(items) - visible, vp))
     state.viewport_start = vp
 
     # Scroll indicator top
     if vp > 0:
-        fragments.append(("class:radio-menu-dim", "  \u25b2 more above\n"))
+        scroll_up = _pad_line("  \u25b2 more above")
+        fragments.append(("class:radio-menu-border", f"  {BOX_V} "))
+        fragments.append(("class:radio-menu-dim", scroll_up))
+        fragments.append(("class:radio-menu-border", f" {BOX_V}\n"))
 
     rendered = 0
     for idx in range(vp, len(items)):
@@ -286,10 +329,23 @@ def render_menu(state: RadioMenuState) -> List[Tuple[str, str]]:
 
         if item.is_header:
             if item.label:
-                fragments.append(("class:radio-menu-header", f"\n  {item.label}\n"))
+                # Section separator with embedded label
+                sep = _section_header(item.label)
+                # Empty line before section (visual breathing room)
+                empty = " " * INNER_WIDTH
+                fragments.append(("class:radio-menu-border", f"  {BOX_V} "))
+                fragments.append(("", empty))
+                fragments.append(("class:radio-menu-border", f" {BOX_V}\n"))
+                # The header line
+                fragments.append(("class:radio-menu-border", f"  {BOX_V} "))
+                fragments.append(("class:radio-menu-header", _pad_line(sep)))
+                fragments.append(("class:radio-menu-border", f" {BOX_V}\n"))
                 rendered += 2
             else:
-                fragments.append(("", "\n"))
+                empty = " " * INNER_WIDTH
+                fragments.append(("class:radio-menu-border", f"  {BOX_V} "))
+                fragments.append(("", empty))
+                fragments.append(("class:radio-menu-border", f" {BOX_V}\n"))
                 rendered += 1
             continue
 
@@ -297,10 +353,14 @@ def render_menu(state: RadioMenuState) -> List[Tuple[str, str]]:
         pointer = " \u25b8 " if is_selected else "   "
 
         if item.is_toggle:
-            check = "\u25a0" if item.toggled else "\u25a1"
+            check = TOGGLE_ON if item.toggled else TOGGLE_OFF
             text = f"{pointer}{check} {item.label}"
         else:
             text = f"{pointer}  {item.label}"
+
+        # Append sublabel inline
+        if item.sublabel:
+            text += f"  {item.sublabel}"
 
         # Style based on state
         if is_selected:
@@ -312,25 +372,32 @@ def render_menu(state: RadioMenuState) -> List[Tuple[str, str]]:
         else:
             style = "class:radio-menu-item"
 
-        fragments.append((style, text))
-
-        # Sublabel
-        if item.sublabel:
-            fragments.append(("class:radio-menu-dim", f"  {item.sublabel}"))
-
-        fragments.append(("", "\n"))
+        fragments.append(("class:radio-menu-border", f"  {BOX_V} "))
+        fragments.append((style, _pad_line(text)))
+        fragments.append(("class:radio-menu-border", f" {BOX_V}\n"))
         rendered += 1
 
     # Scroll indicator bottom
     if vp + visible < len(items):
-        fragments.append(("class:radio-menu-dim", "  \u25bc more below\n"))
+        scroll_dn = _pad_line("  \u25bc more below")
+        fragments.append(("class:radio-menu-border", f"  {BOX_V} "))
+        fragments.append(("class:radio-menu-dim", scroll_dn))
+        fragments.append(("class:radio-menu-border", f" {BOX_V}\n"))
 
-    # Footer: current state
+    # ├─ footer separator ─┤
+    fragments.append(("class:radio-menu-border", f"  {BOX_V}{BOX_H * (MENU_WIDTH - 2)}{BOX_V}\n"))
+
+    # Footer: current crate dig config
     decades_str = ", ".join(f"{d}s" for d in sorted(state.active_decades)) or "none"
     moods_str = ", ".join(sorted(state.active_moods)) or "none"
     mic_str = "on" if state.mic_breaks else "off"
-    fragments.append(("class:radio-menu-border", "\n  " + "\u2500" * 54 + "\n"))
-    fragments.append(("class:radio-menu-dim", f"  decades: {decades_str}  moods: {moods_str}  mic: {mic_str}\n"))
+    footer = f"decades: {decades_str}  moods: {moods_str}  mic: {mic_str}"
+    fragments.append(("class:radio-menu-border", f"  {BOX_V} "))
+    fragments.append(("class:radio-menu-dim", _pad_line(footer)))
+    fragments.append(("class:radio-menu-border", f" {BOX_V}\n"))
+
+    # ╰─ bottom border ─╯
+    fragments.append(("class:radio-menu-border", f"  {BOX_BL}{BOX_H * (MENU_WIDTH - 2)}{BOX_BR}\n"))
 
     return fragments
 
@@ -352,26 +419,38 @@ def radio_menu_fallback(
             active_moods=active_moods, mic_breaks=mic_breaks,
         )
 
-        print("\n  HERMES RADIO\n  " + "\u2500" * 50)
+        w = MENU_WIDTH - 4
+        print(f"\n  {BOX_TL}{BOX_H * (MENU_WIDTH - 2)}{BOX_TR}")
+        print(f"  {BOX_V} {'HERMES RADIO':{w}} {BOX_V}")
+        print(f"  {BOX_V}{BOX_H * (MENU_WIDTH - 2)}{BOX_V}")
+
         num = 0
         idx_map = {}
         for i, item in enumerate(items):
             if item.is_header:
                 if item.label:
-                    print(f"\n  {item.label}")
+                    sep = _section_header(item.label)
+                    print(f"  {BOX_V}  {' ' * (w - 1)}{BOX_V}")
+                    print(f"  {BOX_V} {sep:{w}} {BOX_V}")
                 continue
             num += 1
             idx_map[num] = i
             if item.is_toggle:
-                check = "\u25a0" if item.toggled else "\u25a1"
+                check = TOGGLE_ON if item.toggled else TOGGLE_OFF
                 label = f"{check} {item.label}"
             else:
                 label = f"  {item.label}"
             sub = f"  ({item.sublabel})" if item.sublabel else ""
-            print(f"  {num:2d}. {label}{sub}")
+            line = f"{num:2d}. {label}{sub}"
+            print(f"  {BOX_V} {line:{w}} {BOX_V}")
 
-        print(f"\n  decades: {', '.join(f'{d}s' for d in sorted(active_decades))}")
-        print(f"  moods: {', '.join(sorted(active_moods))}  |  mic: {'on' if mic_breaks else 'off'}\n")
+        print(f"  {BOX_V}{BOX_H * (MENU_WIDTH - 2)}{BOX_V}")
+        decades_str = ", ".join(f"{d}s" for d in sorted(active_decades))
+        moods_str = ", ".join(sorted(active_moods))
+        mic_str = "on" if mic_breaks else "off"
+        footer = f"decades: {decades_str}  moods: {moods_str}  mic: {mic_str}"
+        print(f"  {BOX_V} {footer:{w}} {BOX_V}")
+        print(f"  {BOX_BL}{BOX_H * (MENU_WIDTH - 2)}{BOX_BR}")
 
         try:
             raw = input("  Enter number (q to quit): ").strip()
@@ -415,16 +494,22 @@ def search_menu(results: List[Dict[str, Any]], title: str = "Search Results") ->
         print("  No results found.")
         return None
 
-    print(f"\n  {title}\n  " + "\u2500" * 50)
+    w = MENU_WIDTH - 4
+    print(f"\n  {BOX_TL}{BOX_H * (MENU_WIDTH - 2)}{BOX_TR}")
+    print(f"  {BOX_V} {title:{w}} {BOX_V}")
+    print(f"  {BOX_V}{BOX_H * (MENU_WIDTH - 2)}{BOX_V}")
+
     for i, r in enumerate(results, 1):
         name = r.get("name") or r.get("title") or "?"
         extra = r.get("country") or r.get("genre") or r.get("tags", "")
         if isinstance(extra, str) and len(extra) > 30:
             extra = extra[:27] + "..."
         sub = f"  ({extra})" if extra else ""
-        print(f"  {i:2d}. {name}{sub}")
+        line = f"{i:2d}. {name}{sub}"
+        print(f"  {BOX_V} {line:{w}} {BOX_V}")
 
-    print()
+    print(f"  {BOX_BL}{BOX_H * (MENU_WIDTH - 2)}{BOX_BR}")
+
     try:
         raw = input("  Enter number (q to back): ").strip()
     except (EOFError, KeyboardInterrupt):
