@@ -1,0 +1,17 @@
+name: mirror
+mode: bars
+chars: braille
+rows: 3
+width: 32
+colors:
+  - "#7ee6a8"
+  - "#56d4dd"
+  - "#7eb8f6"
+  - "#9b8cf6"
+  - "#7eb8f6"
+  - "#56d4dd"
+attack: 15.0
+decay: 5.0
+center_boost: 0.15
+mirror: true
+peak_hold: 0.0

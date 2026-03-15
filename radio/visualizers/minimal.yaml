@@ -1,0 +1,12 @@
+name: minimal
+mode: bars
+chars: braille
+rows: 1
+width: 16
+colors:
+  - "#c9d1d9"
+attack: 10.0
+decay: 6.0
+center_boost: 0.0
+mirror: false
+peak_hold: 0.0

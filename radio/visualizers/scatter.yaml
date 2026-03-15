@@ -1,0 +1,14 @@
+name: scatter
+mode: scatter
+chars: dots
+rows: 3
+width: 40
+colors:
+  - "#bc8cff"
+  - "#7eb8f6"
+  - "#56d4dd"
+attack: 20.0
+decay: 8.0
+center_boost: 0.0
+mirror: false
+peak_hold: 0.0

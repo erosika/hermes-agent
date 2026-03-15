@@ -514,6 +514,21 @@ def _generate_bars_expanded(position: float, title: str, paused: bool) -> List[s
             energy = 0.6 + 0.4 * math.sin(pos * 0.4 + title_seed * 0.001)
             levels[i] = val * center * energy * 1.6 + 0.15
 
+    # Load visualizer preset for attack/decay/rows/mirror
+    try:
+        from radio.visualizers import load_preset
+        preset = load_preset()
+    except Exception:
+        preset = {"attack": 12.0, "decay": 4.0, "rows": 3, "mirror": False,
+                  "center_boost": 0.25, "chars": "braille"}
+
+    atk = preset.get("attack", 12.0)
+    dec = preset.get("decay", 4.0)
+    num_rows = preset.get("rows", 3)
+    do_mirror = preset.get("mirror", False)
+    char_set = preset.get("chars", "braille")
+    cb = preset.get("center_boost", 0.25)
+
     if paused:
         for i in range(n):
             _bar_levels_exp[i] *= 0.85
@@ -521,19 +536,37 @@ def _generate_bars_expanded(position: float, title: str, paused: bool) -> List[s
         dt = 0.3
         for i in range(n):
             val = levels[i]
+            # Apply center boost from preset
+            if cb > 0:
+                center = 1.0 - abs(i - n / 2) / (n / 2) * cb
+                val *= center
             if val > _bar_levels_exp[i]:
-                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, 12.0 * dt)
+                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, atk * dt)
             else:
-                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, 4.0 * dt)
+                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, dec * dt)
 
-    # Render 3 stacked braille rows (12 vertical levels total per bar)
-    rows = ["", "", ""]
-    for i in range(n):
-        stack = _braille_bar_stack(max(0.0, min(1.0, _bar_levels_exp[i])), rows=3)
-        for row_idx, ch in enumerate(stack):
+    # Mirror mode: duplicate bars symmetrically
+    bar_data = list(_bar_levels_exp[:n])
+    if do_mirror:
+        half = bar_data[:n // 2]
+        bar_data = list(reversed(half)) + half
+
+    # Render stacked rows
+    num_rows = max(1, min(6, num_rows))
+    rows = [""] * num_rows
+    for i in range(len(bar_data)):
+        level = max(0.0, min(1.0, bar_data[i]))
+        if char_set == "blocks":
+            # Use block characters (single row)
+            idx = max(0, min(8, int(level * 8)))
+            ch_stack = [_BLOCKS[idx]] * num_rows
+        else:
+            # Use braille (default)
+            ch_stack = _braille_bar_stack(level, rows=num_rows)
+        for row_idx, ch in enumerate(ch_stack):
             rows[row_idx] += ch
 
-    return rows  # top, mid, bottom
+    return rows
 
 
 def get_mini_player_height() -> int:
