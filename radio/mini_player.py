@@ -58,22 +58,42 @@ def _braille_bar_2row(height: float) -> List[str]:
 
     8 vertical levels across 2 characters stacked.
     """
-    filled = round(height * 8)
-    filled = max(0, min(8, filled))
+    return _braille_bar_stack(height, rows=2)
 
-    # Bottom character: first 4 rows
-    bot_fill = min(filled, 4)
-    bot_code = 0
-    for i in range(bot_fill):
-        bot_code |= _BRAILLE_ROWS[i]
 
-    # Top character: remaining rows
-    top_fill = max(0, filled - 4)
-    top_code = 0
-    for i in range(top_fill):
-        top_code |= _BRAILLE_ROWS[i]
+def _braille_bar_stack(height: float, rows: int = 3) -> List[str]:
+    """Convert a normalized height to N stacked braille characters."""
+    total_levels = max(1, rows * 4)
+    filled = round(height * total_levels)
+    filled = max(0, min(total_levels, filled))
 
-    return [chr(_BRAILLE_BASE + top_code), chr(_BRAILLE_BASE + bot_code)]
+    out = []
+    remaining = filled
+    for _ in range(rows):
+        row_fill = min(4, remaining)
+        code = 0
+        for i in range(row_fill):
+            code |= _BRAILLE_ROWS[i]
+        out.append(chr(_BRAILLE_BASE + code))
+        remaining = max(0, remaining - 4)
+    return list(reversed(out))
+
+
+def _gradient_fragments(row: str, steps: int = 6) -> List[Tuple[str, str]]:
+    """Split a row into themed gradient fragments for prompt_toolkit styling."""
+    if not row:
+        return []
+    steps = max(1, min(steps, len(row)))
+    width = len(row)
+    fragments: List[Tuple[str, str]] = []
+    start = 0
+    for idx in range(steps):
+        end = round((idx + 1) * width / steps)
+        chunk = row[start:end]
+        if chunk:
+            fragments.append((f"class:radio-bars-grad-{idx}", chunk))
+        start = end
+    return fragments
 
 
 def _noise(seed: int, idx: int) -> float:
@@ -345,7 +365,7 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
     fragments.append(("", " " * (W - 2)))
     fragments.append(("class:radio-border", "\u2502\n"))
 
-    # Row 4-6: large visualizer (3 rows of bars)
+    # Row 4-6: large visualizer (3 rows of braille bars with theme gradient)
     bars_str = _generate_bars_expanded(
         position=now.position or 0.0,
         title=f"{now.artist}-{now.title}",
@@ -354,7 +374,7 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
     for row in bars_str:
         pad = W - 4 - len(row)
         fragments.append(("class:radio-border", "  \u2502 "))
-        fragments.append(("class:radio-bars", row))
+        fragments.extend(_gradient_fragments(row, steps=6))
         fragments.append(("", " " * max(0, pad + 1)))
         fragments.append(("class:radio-border", "\u2502\n"))
 
@@ -404,9 +424,13 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
         fragments.append(("", " " * max(0, pad + 1)))
         fragments.append(("class:radio-border", "\u2502\n"))
 
-    # Row 11: empty
-    fragments.append(("class:radio-border", "  \u2502"))
-    fragments.append(("", " " * (W - 2)))
+    # Row 11: keyboard controls
+    controls = "space pause  n skip  m mute  -/+ vol  V size"
+    cline = controls[:W - 4]
+    pad = W - 4 - len(cline)
+    fragments.append(("class:radio-border", "  \u2502 "))
+    fragments.append(("class:radio-tags", cline))
+    fragments.append(("", " " * max(0, pad + 1)))
     fragments.append(("class:radio-border", "\u2502\n"))
 
     # Row 12: Progress bar + time
@@ -441,7 +465,7 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
 
 
 def _generate_bars_expanded(position: float, title: str, paused: bool) -> List[str]:
-    """Generate 3 rows of wide visualizer bars for expanded mode."""
+    """Generate 3 rows of wide braille visualizer bars for expanded mode."""
     global _bar_levels_exp
 
     n = _BARS_EXPANDED
@@ -488,29 +512,18 @@ def _generate_bars_expanded(position: float, title: str, paused: bool) -> List[s
             else:
                 _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, 4.0 * dt)
 
-    # Render 3 rows (top, mid, bottom) using block characters
-    # Each bar has height 0-24 (3 rows x 8 levels)
+    # Render 3 stacked braille rows (12 vertical levels total per bar)
     rows = ["", "", ""]
     for i in range(n):
-        h = int(_bar_levels_exp[i] * 24)
-        h = max(0, min(24, h))
-
-        # Bottom row: 0-8
-        bot = min(8, h)
-        # Mid row: 8-16
-        mid = min(8, max(0, h - 8))
-        # Top row: 16-24
-        top = min(8, max(0, h - 16))
-
-        rows[0] += _BLOCKS[top]
-        rows[1] += _BLOCKS[mid]
-        rows[2] += _BLOCKS[bot]
+        stack = _braille_bar_stack(max(0.0, min(1.0, _bar_levels_exp[i])), rows=3)
+        for row_idx, ch in enumerate(stack):
+            rows[row_idx] += ch
 
     return rows  # top, mid, bottom
 
 
 def get_mini_player_height() -> int:
-    """Return display height: 0 (inactive), 2 (mini), or 15 (expanded)."""
+    """Return display height: 0 (inactive), 2 (mini), or 14 (expanded)."""
     try:
         from radio.player import HermesRadio
         if not HermesRadio.active():

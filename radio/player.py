@@ -78,6 +78,8 @@ class HermesRadio:
         self._decade_weights: Optional[Dict[int, float]] = None
         # State poll task (created in start())
         self._state_poll_task = None
+        self._muted = False
+        self._pre_mute_volume = 80.0
 
     @classmethod
     def get(cls) -> "HermesRadio":
@@ -266,6 +268,9 @@ class HermesRadio:
     async def set_volume(self, level: float) -> str:
         await self._primary.set_volume(level)
         self._now.volume = level
+        self._muted = level <= 0
+        if level > 0:
+            self._pre_mute_volume = level
         self._notify_state_change()
         return f"Volume: {int(level)}%"
 
@@ -273,6 +278,23 @@ class HermesRadio:
         current = await self._primary.get_volume()
         new_vol = max(0, min(100, current + delta))
         return await self.set_volume(new_vol)
+
+    async def toggle_mute(self) -> str:
+        current = await self._primary.get_volume()
+        if self._muted or current <= 0:
+            restore = self._pre_mute_volume if self._pre_mute_volume > 0 else 50.0
+            await self._primary.set_volume(restore)
+            self._now.volume = restore
+            self._muted = False
+            self._notify_state_change()
+            return "Unmuted"
+
+        self._pre_mute_volume = current if current > 0 else (self._pre_mute_volume or 50.0)
+        await self._primary.set_volume(0)
+        self._now.volume = 0
+        self._muted = True
+        self._notify_state_change()
+        return "Muted"
 
     # ------------------------------------------------------------------
     # State
@@ -401,16 +423,19 @@ class HermesRadio:
                 self._primary.on("end-file", on_end)
 
                 # Wait for either natural end or skip
+                wait_end = asyncio.create_task(end_event.wait())
+                wait_skip = asyncio.create_task(self._skip_event.wait())
                 try:
                     done, pending = await asyncio.wait(
-                        [
-                            asyncio.create_task(end_event.wait()),
-                            asyncio.create_task(self._skip_event.wait()),
-                        ],
+                        [wait_end, wait_skip],
                         return_when=asyncio.FIRST_COMPLETED,
                     )
                     for task in pending:
                         task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
                 finally:
                     if on_end in self._primary._event_callbacks.get("end-file", []):
                         self._primary._event_callbacks["end-file"].remove(on_end)
@@ -655,6 +680,7 @@ Source: {now.source_mode}"""
                         self._now.position = await self._primary.get_position()
                         self._now.duration = await self._primary.get_duration()
                         self._now.volume = await self._primary.get_volume()
+                        self._muted = self._now.volume <= 0
                 except Exception:
                     pass
                 await asyncio.sleep(0.3)
