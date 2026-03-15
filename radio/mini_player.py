@@ -313,7 +313,10 @@ def _get_mini_text() -> List[Tuple[str, str]]:
     # Second line: control hints, progress bar (finite tracks only), or nothing (streams)
     fragments.append(("", "\n"))
     if control_mode:
-        fragments.append(("class:radio-control", "  Spc pause  n skip  m mute  -/+ vol  Tab expand  Ctrl+O/q exit"))
+        if is_stream:
+            fragments.append(("class:radio-control", "  Spc pause  m mute  -/+ vol  Tab size  Ctrl+O/q exit"))
+        else:
+            fragments.append(("class:radio-control", "  Spc pause  n skip  m mute  -/+ vol  Tab size  Ctrl+O/q exit"))
     elif not is_stream and now.duration and now.duration > 0 and now.position is not None:
         bar_width = 52
         progress = max(0.0, min(1.0, now.position / now.duration))
@@ -450,8 +453,11 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
         fragments.append(("", " " * max(0, pad + 1)))
         fragments.append(("class:radio-border", "\u2502\n"))
 
-    # Row 11: keyboard controls
-    controls = "space pause  n skip  m mute  -/+ vol  V size"
+    # Row 11: keyboard controls (context-aware)
+    if is_stream:
+        controls = "Spc pause  m mute  -/+ vol  Tab size  Ctrl+O/q exit"
+    else:
+        controls = "Spc pause  n skip  m mute  -/+ vol  Tab size  Ctrl+O/q exit"
     cline = controls[:W - 4]
     pad = W - 4 - len(cline)
     fragments.append(("class:radio-border", "  \u2502 "))
