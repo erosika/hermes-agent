@@ -4380,9 +4380,8 @@ class HermesCLI:
                 event.app.invalidate()
 
         # --- Radio control mode (modal) ---
-        # Escape+R toggles into/out of radio control mode.
-        # While in control mode, single keys drive the radio.
-        # Escape, Ctrl+C, or Escape+R again exits control mode.
+        # Ctrl+O toggles into radio control mode.
+        # Ctrl+O again, Ctrl+C, or q exits control mode.
         _radio_control = Condition(
             lambda: getattr(self, '_radio_control_mode', False)
         )
@@ -4400,19 +4399,29 @@ class HermesCLI:
             except ImportError:
                 pass
 
-        @kb.add('escape', 'r', filter=_no_modal)
+        @kb.add('c-o')
         def radio_control_toggle(event):
+            """Ctrl+O: radio controls (or open /radio menu if not playing)."""
+            if self._radio_control_mode:
+                _set_control_mode(False)
+                event.app.invalidate()
+                return
+            if not _no_modal():
+                return
             try:
                 from radio.player import HermesRadio
-                if not HermesRadio.active():
+                if HermesRadio.active():
+                    _set_control_mode(True)
+                    event.app.invalidate()
                     return
             except ImportError:
-                return
-            _set_control_mode(not self._radio_control_mode)
-            event.app.invalidate()
+                pass
+            # Not playing -- queue /radio command
+            if hasattr(self, '_pending_input'):
+                self._pending_input.put("/radio")
 
-        @kb.add('escape', filter=_radio_control)
         @kb.add('c-c', filter=_radio_control)
+        @kb.add('q', filter=_radio_control)
         def radio_control_exit(event):
             _set_control_mode(False)
             event.app.invalidate()

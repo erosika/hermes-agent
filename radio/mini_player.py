@@ -309,7 +309,7 @@ def _get_mini_text() -> List[Tuple[str, str]]:
     # Second line: control hints (when in control mode) or progress bar
     fragments.append(("", "\n"))
     if control_mode:
-        fragments.append(("class:radio-control", "  Spc pause  n skip  m mute  -/+ vol  Tab expand  Esc exit"))
+        fragments.append(("class:radio-control", "  Spc pause  n skip  m mute  -/+ vol  Tab expand  Ctrl+O/q exit"))
     elif now.duration and now.duration > 0 and now.position is not None:
         bar_width = 52
         progress = max(0.0, min(1.0, now.position / now.duration))
