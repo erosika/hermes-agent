@@ -96,6 +96,10 @@ class RadioMenuState:
                 elif tk == "mic_breaks":
                     item.toggled = self.mic_breaks
 
+        # Crate config sub-menu state
+        self._in_crate_config = False
+        self._crate_country: Optional[str] = None
+
         # Section boundaries (for left/right tab navigation)
         self._sections: List[int] = []
         for i, idx in enumerate(self.selectable):
@@ -158,6 +162,22 @@ class RadioMenuState:
         elif tk == "mic_breaks":
             self.mic_breaks = not self.mic_breaks
             item.toggled = self.mic_breaks
+        elif tk.startswith("country:"):
+            # Radio-button: deselect all others, select this one
+            code = tk.split(":")[1]
+            self._crate_country = None if code == "random" else code
+            for it in self.items:
+                if it.toggle_key.startswith("country:"):
+                    it.toggled = (it.toggle_key == tk)
+        elif tk == "save_tracks":
+            try:
+                from radio.config import load, save
+                cfg = load()
+                cfg["save_tracks"] = not cfg.get("save_tracks", False)
+                save(cfg)
+                item.toggled = cfg["save_tracks"]
+            except Exception:
+                item.toggled = not item.toggled
 
         # Persist to disk
         try:
@@ -176,10 +196,43 @@ class RadioMenuState:
             self.toggle_current()
             return
 
+        # Crate dig: open config sub-menu instead of playing immediately
+        if item.action == "crate" and not getattr(self, '_in_crate_config', False):
+            self._in_crate_config = True
+            self._crate_country = item.data.get("country")  # pre-selected country
+            self.items = build_crate_config(
+                active_decades=self.active_decades,
+                active_moods=self.active_moods,
+                mic_breaks=self.mic_breaks,
+                country=self._crate_country,
+            )
+            self.selectable = [i for i, it in enumerate(self.items) if not it.is_header]
+            self.cursor = 0
+            self.viewport_start = 0
+            # Sync toggle state
+            for it in self.items:
+                if it.is_toggle:
+                    tk = it.toggle_key
+                    if tk.startswith("decade:"):
+                        it.toggled = int(tk.split(":")[1]) in self.active_decades
+                    elif tk.startswith("mood:"):
+                        it.toggled = tk.split(":")[1] in self.active_moods
+                    elif tk == "mic_breaks":
+                        it.toggled = self.mic_breaks
+                    elif tk == "save_tracks":
+                        try:
+                            from radio.config import load
+                            it.toggled = load().get("save_tracks", False)
+                        except Exception:
+                            pass
+            return
+
         # Inject toggle state into the action data
         if item.action == "crate":
             item.data["decades"] = sorted(self.active_decades) if self.active_decades else None
             item.data["moods"] = sorted(self.active_moods) if self.active_moods else None
+            if self._crate_country:
+                item.data["country"] = self._crate_country
         item.data["mic_breaks"] = self.mic_breaks
         self.result = item
         self.done.set()
@@ -187,6 +240,83 @@ class RadioMenuState:
     def cancel(self):
         self.result = None
         self.done.set()
+
+
+# -- Crate digger config sub-menu ------------------------------------------
+
+CRATE_COUNTRIES = [
+    ("Random", None),
+    ("Japan", "JPN"), ("France", "FRA"), ("UK", "GBR"), ("USA", "USA"),
+    ("Brazil", "BRA"), ("Senegal", "SEN"), ("Nigeria", "NGA"), ("Egypt", "EGY"),
+    ("India", "IND"), ("Korea", "KOR"), ("Turkey", "TUR"), ("Greece", "GRC"),
+    ("Cuba", "CUB"), ("Colombia", "COL"), ("Mexico", "MEX"), ("Thailand", "THA"),
+    ("Indonesia", "IDN"), ("Iran", "IRN"), ("Argentina", "ARG"),
+]
+
+
+def build_crate_config(
+    active_decades=None, active_moods=None, mic_breaks=True, country=None,
+) -> List[MenuItem]:
+    """Build the crate digger configuration sub-menu."""
+    if active_decades is None:
+        active_decades = {1950, 1960, 1970, 1980, 1990}
+    if active_moods is None:
+        active_moods = {"slow", "fast", "weird"}
+
+    items: List[MenuItem] = []
+
+    items.append(MenuItem(label="CRATE DIGGER CONFIG", is_header=True))
+
+    # Decades
+    items.append(MenuItem(label="DECADES", is_header=True))
+    for decade in [1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020]:
+        items.append(MenuItem(
+            label=f"{decade}s", is_toggle=True,
+            toggled=decade in active_decades,
+            toggle_key=f"decade:{decade}",
+        ))
+
+    # Moods
+    items.append(MenuItem(label="MOODS", is_header=True))
+    for mood, desc in [("weird", "the good stuff"), ("slow", "deep, contemplative"), ("fast", "upbeat, energetic")]:
+        items.append(MenuItem(
+            label=mood, sublabel=desc, is_toggle=True,
+            toggled=mood in active_moods,
+            toggle_key=f"mood:{mood}",
+        ))
+
+    # Country (radio-button style -- only one active)
+    items.append(MenuItem(label="COUNTRY", is_header=True))
+    for name, code in CRATE_COUNTRIES:
+        items.append(MenuItem(
+            label=name, sublabel=code or "discover",
+            is_toggle=True,
+            toggled=(code == country),
+            toggle_key=f"country:{code or 'random'}",
+        ))
+
+    # Options
+    items.append(MenuItem(label="OPTIONS", is_header=True))
+    save_tracks = False
+    try:
+        from radio.config import load
+        save_tracks = load().get("save_tracks", False)
+    except Exception:
+        pass
+    items.append(MenuItem(
+        label="Save MP3s to disk", sublabel="~/.hermes/radio/tracks/",
+        is_toggle=True, toggled=save_tracks, toggle_key="save_tracks",
+    ))
+    items.append(MenuItem(
+        label="Mic breaks", sublabel="AI DJ commentary",
+        is_toggle=True, toggled=mic_breaks, toggle_key="mic_breaks",
+    ))
+
+    # Start button
+    items.append(MenuItem(label="", is_header=True))
+    items.append(MenuItem(label="Start digging", sublabel="Enter", action="crate"))
+
+    return items
 
 
 # -- Build items -----------------------------------------------------------
