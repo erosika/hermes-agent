@@ -537,23 +537,60 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
 
 
 def _generate_bars_expanded(position: float, title: str, paused: bool) -> List[str]:
-    """Generate expanded visualizer rows via the shared visualizer engine."""
-    from radio.visualizer_engine import render_rows
-    from radio.visualizers import load_preset
+    """Generate 3 rows of wide braille visualizer bars (direct, no engine)."""
+    global _bar_levels_exp
 
+    n = _BARS_EXPANDED
+
+    # Get real or synthetic levels
+    levels = [0.0] * n
     try:
-        preset = load_preset()
-    except Exception:
-        preset = {"rows": 3}
+        from radio.level_meter import get_levels, is_active
+        if is_active():
+            raw = get_levels(n)
+            if len(raw) >= 3 and any(v > 0.05 for v in raw):
+                for i in range(n):
+                    idx = min(i, len(raw) - 1)
+                    levels[i] = raw[idx]
+                    j = _noise(int(time.time() * 3), i) * 0.12
+                    levels[i] = max(0.0, min(1.0, levels[i] + j - 0.06))
+    except ImportError:
+        pass
 
-    return render_rows(
-        preset_name=None,
-        width=_BARS_EXPANDED,
-        rows=3,  # always 3 rows for consistent height
-        paused=paused,
-        position=position,
-        title_seed=title,
-    )
+    # Synthetic fallback if no real levels
+    if all(lv == 0.0 for lv in levels) and not paused:
+        pos = time.time()
+        title_seed = int(hashlib.md5((title or "x").encode()).hexdigest()[:8], 16)
+        for i in range(n):
+            freq = 1.2 + i * 0.5
+            phase = title_seed + i * 137
+            val = _noise(int(pos * freq) + phase, i) * 0.5
+            val += _noise(int(pos * freq * 2.7) + phase + 1000, i) * 0.3
+            val += _noise(int(pos * freq * 6.1) + phase + 2000, i) * 0.2
+            center = 0.6 + 0.4 * (1.0 - abs(i - n / 2) / (n / 2))
+            energy = 0.6 + 0.4 * math.sin(pos * 0.4 + title_seed * 0.001)
+            levels[i] = val * center * energy * 1.6 + 0.15
+
+    if paused:
+        for i in range(n):
+            _bar_levels_exp[i] *= 0.85
+    else:
+        dt = 0.3
+        for i in range(n):
+            val = levels[i]
+            if val > _bar_levels_exp[i]:
+                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, 12.0 * dt)
+            else:
+                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, 4.0 * dt)
+
+    # Render 3 stacked braille rows
+    rows = ["", "", ""]
+    for i in range(n):
+        stack = _braille_bar_stack(max(0.0, min(1.0, _bar_levels_exp[i])), rows=3)
+        for row_idx, ch in enumerate(stack):
+            rows[row_idx] += ch
+
+    return rows
 
 
 def get_mini_player_height() -> int:
