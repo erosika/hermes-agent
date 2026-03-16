@@ -99,6 +99,7 @@ class RadioMenuState:
         # Crate config sub-menu state
         self._in_crate_config = False
         self._crate_country: Optional[str] = None
+        self._active_countries: Set[str] = set()
 
         # Section boundaries (for left/right tab navigation)
         self._sections: List[int] = []
@@ -163,12 +164,15 @@ class RadioMenuState:
             self.mic_breaks = not self.mic_breaks
             item.toggled = self.mic_breaks
         elif tk.startswith("country:"):
-            # Radio-button: deselect all others, select this one
+            # Multi-select: toggle this country on/off
             code = tk.split(":")[1]
-            self._crate_country = None if code == "random" else code
-            for it in self.items:
-                if it.toggle_key.startswith("country:"):
-                    it.toggled = (it.toggle_key == tk)
+            if not hasattr(self, '_active_countries'):
+                self._active_countries = set()
+            if code in self._active_countries:
+                self._active_countries.discard(code)
+            else:
+                self._active_countries.add(code)
+            item.toggled = code in self._active_countries
         elif tk == "save_tracks":
             try:
                 from radio.config import load, save
@@ -231,7 +235,12 @@ class RadioMenuState:
         if item.action == "crate":
             item.data["decades"] = sorted(self.active_decades) if self.active_decades else None
             item.data["moods"] = sorted(self.active_moods) if self.active_moods else None
-            if self._crate_country:
+            # Multi-country: pick one randomly from selected, or None for random
+            countries = self._active_countries
+            if countries:
+                import random
+                item.data["country"] = random.choice(sorted(countries))
+            elif self._crate_country:
                 item.data["country"] = self._crate_country
         item.data["mic_breaks"] = self.mic_breaks
         self.result = item
@@ -256,16 +265,35 @@ CRATE_COUNTRIES = [
 
 def build_crate_config(
     active_decades=None, active_moods=None, mic_breaks=True, country=None,
+    active_countries=None,
 ) -> List[MenuItem]:
     """Build the crate digger configuration sub-menu."""
     if active_decades is None:
         active_decades = {1950, 1960, 1970, 1980, 1990}
     if active_moods is None:
         active_moods = {"slow", "fast", "weird"}
+    if active_countries is None:
+        active_countries = {country} if country else set()
 
     items: List[MenuItem] = []
 
     items.append(MenuItem(label="CRATE DIGGER CONFIG", is_header=True))
+
+    # Options first (most actionable)
+    save_tracks = False
+    try:
+        from radio.config import load
+        save_tracks = load().get("save_tracks", False)
+    except Exception:
+        pass
+    items.append(MenuItem(
+        label="Save MP3s to disk", sublabel="~/.hermes/radio/tracks/",
+        is_toggle=True, toggled=save_tracks, toggle_key="save_tracks",
+    ))
+    items.append(MenuItem(
+        label="Mic breaks", sublabel="AI DJ commentary",
+        is_toggle=True, toggled=mic_breaks, toggle_key="mic_breaks",
+    ))
 
     # Decades
     items.append(MenuItem(label="DECADES", is_header=True))
@@ -285,32 +313,17 @@ def build_crate_config(
             toggle_key=f"mood:{mood}",
         ))
 
-    # Country (radio-button style -- only one active)
-    items.append(MenuItem(label="COUNTRY", is_header=True))
+    # Countries (multi-select -- none selected = random discovery)
+    items.append(MenuItem(label="COUNTRIES (none = random)", is_header=True))
     for name, code in CRATE_COUNTRIES:
+        if code is None:
+            continue  # skip "Random" -- it's the default when none selected
         items.append(MenuItem(
-            label=name, sublabel=code or "discover",
+            label=name, sublabel=code,
             is_toggle=True,
-            toggled=(code == country),
-            toggle_key=f"country:{code or 'random'}",
+            toggled=(code in active_countries),
+            toggle_key=f"country:{code}",
         ))
-
-    # Options
-    items.append(MenuItem(label="OPTIONS", is_header=True))
-    save_tracks = False
-    try:
-        from radio.config import load
-        save_tracks = load().get("save_tracks", False)
-    except Exception:
-        pass
-    items.append(MenuItem(
-        label="Save MP3s to disk", sublabel="~/.hermes/radio/tracks/",
-        is_toggle=True, toggled=save_tracks, toggle_key="save_tracks",
-    ))
-    items.append(MenuItem(
-        label="Mic breaks", sublabel="AI DJ commentary",
-        is_toggle=True, toggled=mic_breaks, toggle_key="mic_breaks",
-    ))
 
     # Start button
     items.append(MenuItem(label="", is_header=True))
@@ -363,41 +376,9 @@ def build_menu_items(
                 data={"name": name},
             ))
 
-    # Options near the top too
-    items.append(MenuItem(label="OPTIONS", is_header=True))
-    items.append(MenuItem(label="Mic breaks", sublabel="AI DJ commentary", is_toggle=True, toggled=mic_breaks, toggle_key="mic_breaks"))
-
-    # Crate digger (with decades + moods nested inside)
+    # Crate digger (opens config sub-menu on select)
     items.append(MenuItem(label="CRATE DIGGER", is_header=True))
-    items.append(MenuItem(label="Dig (random country)", sublabel="Radiooooo", action="crate"))
-    items.append(MenuItem(label="Dig Japan", action="crate", data={"country": "JPN"}))
-    items.append(MenuItem(label="Dig France", action="crate", data={"country": "FRA"}))
-    items.append(MenuItem(label="Dig UK", action="crate", data={"country": "GBR"}))
-    items.append(MenuItem(label="Dig USA", action="crate", data={"country": "USA"}))
-    items.append(MenuItem(label="Dig Brazil", action="crate", data={"country": "BRA"}))
-    items.append(MenuItem(label="Dig Senegal", action="crate", data={"country": "SEN"}))
-    items.append(MenuItem(label="Dig Nigeria", action="crate", data={"country": "NGA"}))
-    items.append(MenuItem(label="Dig Egypt", action="crate", data={"country": "EGY"}))
-    items.append(MenuItem(label="Dig India", action="crate", data={"country": "IND"}))
-    items.append(MenuItem(label="Dig Korea", action="crate", data={"country": "KOR"}))
-    items.append(MenuItem(label="Dig Turkey", action="crate", data={"country": "TUR"}))
-    items.append(MenuItem(label="Dig Greece", action="crate", data={"country": "GRC"}))
-    items.append(MenuItem(label="Dig Cuba", action="crate", data={"country": "CUB"}))
-    items.append(MenuItem(label="Dig Colombia", action="crate", data={"country": "COL"}))
-    items.append(MenuItem(label="Dig Mexico", action="crate", data={"country": "MEX"}))
-    items.append(MenuItem(label="Dig Thailand", action="crate", data={"country": "THA"}))
-    items.append(MenuItem(label="Dig Indonesia", action="crate", data={"country": "IDN"}))
-    items.append(MenuItem(label="Dig Iran", action="crate", data={"country": "IRN"}))
-
-    # Decades (sub-section of crate digger)
-    items.append(MenuItem(label="DECADES", is_header=True))
-    for decade in [1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020]:
-        items.append(MenuItem(label=f"{decade}s", is_toggle=True, toggled=decade in active_decades, toggle_key=f"decade:{decade}"))
-
-    # Moods (sub-section of crate digger)
-    items.append(MenuItem(label="MOODS", is_header=True))
-    for mood, desc in [("weird", "the good stuff"), ("slow", "deep, contemplative"), ("fast", "upbeat, energetic")]:
-        items.append(MenuItem(label=mood, sublabel=desc, is_toggle=True, toggled=mood in active_moods, toggle_key=f"mood:{mood}"))
+    items.append(MenuItem(label="Crate Digger", sublabel="configure + start", action="crate"))
     # Curated world stations (from stations.yaml)
     try:
         from radio.stations import load_stations
