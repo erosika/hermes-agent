@@ -241,6 +241,14 @@ def _get_mini_text() -> List[Tuple[str, str]]:
     dial = _DIAL[dial_idx]
     fragments.append(("class:radio-vol", f"  {dial} {vol}"))
 
+    # Recording indicator
+    try:
+        from radio.player import HermesRadio
+        if HermesRadio.active() and HermesRadio.get().is_recording:
+            fragments.append(("class:radio-station", "  \u25cf REC"))
+    except Exception:
+        pass
+
     # Check if radio control mode is active
     control_mode = False
     try:

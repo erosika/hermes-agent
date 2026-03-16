@@ -4359,6 +4359,8 @@ class HermesCLI:
                 _mp._control_mode_active = active
             except ImportError:
                 pass
+            # Visual feedback
+            print(f"  {'Ctrl+O controls active' if active else 'Controls closed'}")
 
         @kb.add('c-o')
         def radio_control_toggle(event):
@@ -4432,9 +4434,11 @@ class HermesCLI:
                     radio = HermesRadio.get()
                     from tools.radio_tool import _run_radio_async
                     if radio.is_recording:
-                        _run_radio_async(radio.stop_recording())
+                        result = _run_radio_async(radio.stop_recording())
+                        print(f"  {result}")
                     else:
-                        _run_radio_async(radio.start_recording())
+                        result = _run_radio_async(radio.start_recording())
+                        print(f"  {result}")
                     event.app.invalidate()
             except Exception:
                 pass
