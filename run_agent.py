@@ -1726,11 +1726,17 @@ class AIAgent:
             tool_guidance.append(
                 "IMPORTANT: You have a built-in radio player (Hermes Radio) with dedicated tools. "
                 "ALWAYS use these tools for music -- NEVER use terminal commands, web_search, or YouTube. "
-                "radio_play: start music (source='crate' for Radiooooo, 'somafm' for channels, 'stream' for URLs). "
-                "radio_skip: skip track. radio_pause: pause/resume. radio_stop: stop. "
-                "radio_volume: set volume. radio_status: check what's playing. "
-                "radio_search: find stations. radio_mic_break: DJ commentary. "
-                "These are direct tool calls -- do NOT try to import radio modules or run Python code."
+                "radio_play: start music. source='crate' plays from Radiooooo (query can include decades like '1970', "
+                "moods like 'weird'/'slow'/'fast', and 3-letter country codes like 'JPN','FRA','GBR','USA','BRA','SEN','NGA','EGY','IND','KOR','TUR','GRC','CUB','COL','MEX','ARG','THA','IDN','IRN'). "
+                "Crate-dug tracks are automatically saved as MP3s to ~/.hermes/radio/tracks/ when save_tracks is enabled -- "
+                "the user does NOT need to use radio_record for this (recording is for live streams). "
+                "source='stream' for live radio URLs. source='somafm' for underground channels. "
+                "radio_skip: skip. radio_pause: pause/resume. radio_stop: stop. "
+                "radio_volume: volume. radio_status: what's playing. "
+                "radio_search: find stations (source='radio_garden' searches by city). "
+                "radio_record: record live STREAMS to disk (not needed for crate digs). "
+                "radio_mic_break: DJ commentary. "
+                "These are direct tool calls -- do NOT import radio modules or run Python code."
             )
         if tool_guidance:
             prompt_parts.append(" ".join(tool_guidance))
