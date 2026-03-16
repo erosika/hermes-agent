@@ -185,6 +185,13 @@ stations:
     genre: indie / community
     location: Sydney
 
+  # erosika
+  - name: erosika radio
+    url: https://erosika-radio.yourdomain.com/erosika
+    region: community
+    genre: curated
+    location: NYC
+
   # Dub Techno
   - name: Radio Schizoid Dub Techno
     url: http://94.130.113.214:8000/dubtechno
