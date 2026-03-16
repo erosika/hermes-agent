@@ -1336,6 +1336,12 @@ class HermesCLI:
             return _run(radio.adjust_volume(-5))
         if action == "mute":
             return _run(radio.toggle_mute())
+        if action == "visualizer_next":
+            from radio.visualizers import cycle_preset
+            return f"Visualizer: {cycle_preset(1)}"
+        if action == "visualizer_prev":
+            from radio.visualizers import cycle_preset
+            return f"Visualizer: {cycle_preset(-1)}"
         return None
 
     def _normalize_model_for_provider(self, resolved_provider: str) -> bool:
@@ -4416,6 +4422,22 @@ class HermesCLI:
             self._run_radio_shortcut_action("volume_up")
             event.app.invalidate()
 
+        @kb.add('<', filter=_radio_control)
+        @kb.add(',', filter=_radio_control)
+        def rc_visualizer_prev(event):
+            result = self._run_radio_shortcut_action("visualizer_prev")
+            if result:
+                print(f"  {result}")
+            event.app.invalidate()
+
+        @kb.add('>', filter=_radio_control)
+        @kb.add('.', filter=_radio_control)
+        def rc_visualizer_next(event):
+            result = self._run_radio_shortcut_action("visualizer_next")
+            if result:
+                print(f"  {result}")
+            event.app.invalidate()
+
         @kb.add('tab', filter=_radio_control)
         def rc_expand(event):
             try:
@@ -5166,6 +5188,8 @@ class HermesCLI:
             'radio-progress': f'{_rskin.get_color("ui_accent", "#7eb8f6")}',
             'radio-progress-bg': f'{_rskin.get_color("banner_dim", "#21262d")}',
             'radio-control': f'{_rskin.get_color("ui_ok", "#7ee6a8")}',
+            'radio-rec': '#f47067 bold',
+            'radio-rec-dim': '#484f58',
         })
         
         # Create the application

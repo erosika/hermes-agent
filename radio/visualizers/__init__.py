@@ -78,6 +78,34 @@ def load_preset(name: str = None) -> Dict[str, Any]:
     return _apply_defaults({})
 
 
+def cycle_preset(direction: int = 1) -> str:
+    """Cycle the active preset forward/backward and persist the selection."""
+    names = list_presets()
+    if not names:
+        return DEFAULT_PRESET
+
+    try:
+        from radio.config import get_visualizer, set_visualizer
+        current = get_visualizer()
+    except Exception:
+        current = DEFAULT_PRESET
+        set_visualizer = None
+
+    if current not in names:
+        new_name = names[0]
+    else:
+        step = 1 if direction >= 0 else -1
+        idx = names.index(current)
+        new_name = names[(idx + step) % len(names)]
+
+    if set_visualizer is not None:
+        try:
+            set_visualizer(new_name)
+        except Exception:
+            pass
+    return new_name
+
+
 def _get_active_preset() -> Optional[str]:
     """Read the active visualizer preset from radio config."""
     try:

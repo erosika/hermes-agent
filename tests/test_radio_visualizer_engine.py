@@ -108,6 +108,20 @@ def test_visualizer_name_round_trips_through_radio_config(tmp_path, monkeypatch)
     assert radio_config.get_visualizer() == 'mirror'
 
 
+def test_cycle_preset_wraps_and_persists(tmp_path, monkeypatch):
+    from radio import config as radio_config
+    from radio import visualizers
+
+    monkeypatch.setattr(radio_config, 'RADIO_DIR', tmp_path)
+    monkeypatch.setattr(radio_config, 'CONFIG_PATH', tmp_path / 'config.yaml')
+    monkeypatch.setattr(visualizers, 'list_presets', lambda: ['braille', 'mirror', 'wide'])
+
+    radio_config.set_visualizer('wide')
+    assert visualizers.cycle_preset(1) == 'braille'
+    assert radio_config.get_visualizer() == 'braille'
+    assert visualizers.cycle_preset(-1) == 'wide'
+
+
 def test_build_menu_items_includes_visualizer_presets(monkeypatch):
     from radio import menu
 

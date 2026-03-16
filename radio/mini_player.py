@@ -241,11 +241,14 @@ def _get_mini_text() -> List[Tuple[str, str]]:
     dial = _DIAL[dial_idx]
     fragments.append(("class:radio-vol", f"  {dial} {vol}"))
 
-    # Recording indicator
+    # Recording indicator (blinks every 0.5s)
     try:
         from radio.player import HermesRadio
         if HermesRadio.active() and HermesRadio.get().is_recording:
-            fragments.append(("class:radio-station", "  \u25cf REC"))
+            if int(time.time() * 2) % 2 == 0:
+                fragments.append(("class:radio-rec", "  \u25cf REC"))
+            else:
+                fragments.append(("class:radio-rec-dim", "  \u25cb REC"))
     except Exception:
         pass
 
@@ -261,9 +264,9 @@ def _get_mini_text() -> List[Tuple[str, str]]:
     fragments.append(("", "\n"))
     if control_mode:
         if is_stream:
-            fragments.append(("class:radio-control", "  Spc pause  m mute  r rec  -/+ vol  Tab size  Ctrl+O/q exit"))
+            fragments.append(("class:radio-control", "  Spc pause  m mute  -/+ vol  </> viz  Tab size  Ctrl+O/q exit"))
         else:
-            fragments.append(("class:radio-control", "  Spc pause  n skip  m mute  r rec  -/+ vol  Tab size  Ctrl+O/q exit"))
+            fragments.append(("class:radio-control", "  Spc pause  n skip  m mute  -/+ vol  </> viz  Tab size  Ctrl+O/q exit"))
     elif not is_stream and now.duration and now.duration > 0 and now.position is not None:
         bar_width = 52
         progress = max(0.0, min(1.0, now.position / now.duration))
@@ -411,9 +414,9 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
     # Row 11: keyboard controls (context-aware)
     is_stream = now.source_mode == "stream"
     if is_stream:
-        controls = "Spc pause  m mute  r rec  -/+ vol  Tab size  Ctrl+O/q exit"
+        controls = "Spc pause  m mute  -/+ vol  </> viz  Tab size  Ctrl+O/q exit"
     else:
-        controls = "Spc pause  n skip  m mute  r rec  -/+ vol  Tab size  Ctrl+O/q exit"
+        controls = "Spc pause  n skip  m mute  -/+ vol  </> viz  Tab size  Ctrl+O/q exit"
     cline = controls[:W - 4]
     pad = W - 4 - len(cline)
     fragments.append(("class:radio-border", "  \u2502 "))
@@ -495,6 +498,26 @@ def get_mini_player_text() -> List[Tuple[str, str]]:
     if _expanded:
         return get_expanded_player_text()
     return _get_mini_text()
+
+
+def _volume_knob(volume: int) -> str:
+    """Return a rotating quarter-circle knob glyph for the current volume."""
+    volume = max(0, min(100, int(volume)))
+    glyphs = ["◜", "◝", "◞", "◟"]
+    idx = min(len(glyphs) - 1, volume * len(glyphs) // 101)
+    return glyphs[idx]
+
+
+def _volume_boxes(volume: int, cells: int = 4) -> str:
+    """Return a filled/empty box meter for the current volume."""
+    volume = max(0, min(100, int(volume)))
+    cells = max(1, cells)
+    filled = min(cells, int(round(volume * cells / 100.0)))
+    return "■" * filled + "□" * (cells - filled)
+
+
+def _volume_display(volume: int, cells: int = 4) -> str:
+    return f"{_volume_knob(volume)} {_volume_boxes(volume, cells)} {volume}"
 
 
 def _format_time(seconds: float) -> str:
