@@ -2,6 +2,13 @@
 # Override with ~/.hermes/radio/stations.yaml
 
 stations:
+  # erosika
+  - name: Erosika DJ
+    url: https://radio.erosika.world/erosika
+    region: community
+    genre: curated
+    location: NYC
+
   # Community / Freeform
   - name: NTS Radio 1
     url: http://stream-relay-geo.ntslive.net/stream
