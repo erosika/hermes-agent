@@ -84,6 +84,26 @@ def test_run_radio_shortcut_action_dispatches_skip_pause_volume_and_mute():
     assert radio.calls == ["pause", "skip", ("volume", 5), ("volume", -5), "mute"]
 
 
+def test_run_radio_shortcut_action_dispatches_visualizer_cycle(monkeypatch):
+    cli = _make_cli_stub(agent_running=True)
+
+    seen = []
+
+    def fake_cycle(direction):
+        seen.append(direction)
+        return 'blocks' if direction > 0 else 'wide'
+
+    monkeypatch.setattr('radio.visualizers.cycle_preset', fake_cycle)
+
+    with patch("radio.player.HermesRadio.active", return_value=True), \
+         patch("radio.player.HermesRadio.get", return_value=_FakeRadio()), \
+         patch("tools.radio_tool._run_radio_async", side_effect=lambda coro: asyncio.run(coro)):
+        assert cli._run_radio_shortcut_action("visualizer_next") == "Visualizer: blocks"
+        assert cli._run_radio_shortcut_action("visualizer_prev") == "Visualizer: wide"
+
+    assert seen == [1, -1]
+
+
 class _FakeThread:
     def __init__(self, *args, **kwargs):
         pass

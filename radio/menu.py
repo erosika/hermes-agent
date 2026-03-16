@@ -348,7 +348,7 @@ def build_menu_items(
             from radio.config import get_visualizer
             active_visualizer = get_visualizer()
         except Exception:
-            active_visualizer = "braille"
+            active_visualizer = "wide"
 
     items: List[MenuItem] = []
 
@@ -357,29 +357,56 @@ def build_menu_items(
         items.append(MenuItem(label="NOW PLAYING", is_header=True))
         title = now_playing.get("title", "")
         artist = now_playing.get("artist", "")
-        display = f"{artist} \u2014 {title}" if artist else title
-        prefix = "\u25b6" if not now_playing.get("paused") else "\u23f8"
+        display = f"{artist} — {title}" if artist else title
+        prefix = "▶" if not now_playing.get("paused") else "⏸"
         items.append(MenuItem(label=f"{prefix} {display}", sublabel=now_playing.get("station_name", ""), action="toggle_pause"))
         items.append(MenuItem(label="Skip track", action="skip"))
         items.append(MenuItem(label="Stop radio", action="stop"))
 
-    # Recently listened (at the top for quick re-tune)
+    # Recently listened (quick re-tune)
     try:
-        from radio.config import get_recent_stations
+        from radio.config import get_recent_stations, load
         recent = get_recent_stations()
-        if recent:
-            items.append(MenuItem(label="RECENT", is_header=True))
-            for station in recent:
-                name = station.get("name", "?")
-                if name and name != "?":
-                    items.append(MenuItem(
-                        label=name,
-                        sublabel=station.get("source", "stream"),
-                        action="stream",
-                        data={"url": station.get("url", ""), "name": name},
-                    ))
+        save_tracks = load().get("save_tracks", False)
     except Exception:
-        pass
+        recent = []
+        save_tracks = False
+
+    if recent:
+        items.append(MenuItem(label="RECENT", is_header=True))
+        for station in recent:
+            name = station.get("name", "?")
+            if name and name != "?":
+                items.append(MenuItem(
+                    label=name,
+                    sublabel=station.get("source", "stream"),
+                    action="stream",
+                    data={"url": station.get("url", ""), "name": name},
+                ))
+
+    # Visualizer and options live near the top for discoverability.
+    visualizer_names = list_presets()
+    if visualizer_names:
+        items.append(MenuItem(label="VISUALIZER", is_header=True))
+        for name in visualizer_names:
+            sublabel = "active" if name == active_visualizer else ""
+            items.append(MenuItem(label=name, sublabel=sublabel, action="visualizer", data={"name": name}))
+
+    items.append(MenuItem(label="OPTIONS", is_header=True))
+    items.append(MenuItem(
+        label="Save MP3s to disk",
+        sublabel="~/.hermes/radio/tracks/",
+        is_toggle=True,
+        toggled=save_tracks,
+        toggle_key="save_tracks",
+    ))
+    items.append(MenuItem(
+        label="Mic breaks",
+        sublabel="AI DJ commentary",
+        is_toggle=True,
+        toggled=mic_breaks,
+        toggle_key="mic_breaks",
+    ))
 
     # Crate digger (opens config sub-menu)
     items.append(MenuItem(label="CRATE DIGGER", is_header=True))
@@ -405,7 +432,7 @@ def build_menu_items(
     except Exception:
         pass
 
-    # SomaFM as fallback if no curated loaded
+    # SomaFM as fallback if no curated list loaded
     if soma_channels:
         try:
             from radio.stations import load_stations
@@ -418,20 +445,6 @@ def build_menu_items(
             for ch in soma_channels:
                 items.append(MenuItem(label=ch.get("title", ch.get("id", "?")), sublabel=ch.get("genre", ""), action="somafm", data={"channel_id": ch.get("id", "")}))
 
-    # Search
-    items.append(MenuItem(label="SEARCH", is_header=True))
-    items.append(MenuItem(label="Search Radio Browser", sublabel="45k+ stations", action="search_rb"))
-    items.append(MenuItem(label="Search Radio Garden", sublabel="by city", action="search_rg"))
-
-    # Visualizer
-    visualizer_names = list_presets()
-    if visualizer_names:
-        items.append(MenuItem(label="VISUALIZER", is_header=True))
-        for name in visualizer_names:
-            sublabel = "active" if name == active_visualizer else ""
-            items.append(MenuItem(label=name, sublabel=sublabel, action="visualizer", data={"name": name}))
-
-    # Search
     items.append(MenuItem(label="SEARCH", is_header=True))
     items.append(MenuItem(label="Search Radio Browser", sublabel="45k+ stations", action="search_rb"))
     items.append(MenuItem(label="Search Radio Garden", sublabel="by city", action="search_rg"))

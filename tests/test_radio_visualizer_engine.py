@@ -189,6 +189,53 @@ def test_mirror_mode_is_horizontally_symmetric_even_without_mirror_flag(monkeypa
     assert row == row[::-1]
 
 
+def test_builtin_mirror_preset_uses_dedicated_mirror_scene():
+    from radio import visualizers
+
+    preset = visualizers.load_preset('mirror')
+
+    assert preset['scene'] == 'mirror'
+
+
+def test_braille_scene_is_distinct_from_plain_bars():
+    from radio import visualizer_engine
+
+    grid = visualizer_engine.TerminalGrid(cols=20, rows=4)
+    state = visualizer_engine.VisualizerState()
+    features = level_meter.VisualizerFeatures(
+        levels=[0.15, 0.25, 0.4, 0.7, 0.95, 0.75, 0.55, 0.35, 0.2, 0.1],
+        energy=0.68,
+        peak=0.95,
+        transient=0.42,
+        motion=0.37,
+        decay=0.06,
+        active=True,
+    )
+    levels = visualizer_engine._resample_levels(features.levels, grid.cols)
+
+    braille_field = visualizer_engine._compose_scene(
+        'braille',
+        grid,
+        levels,
+        features,
+        state,
+        {'detail': 1.4},
+        'braille-seed',
+    )
+    plain_bars = visualizer_engine._scene_bars(grid, levels, features, state, 1.4)
+
+    assert braille_field != plain_bars
+    assert sum(braille_field[0]) > 0.0
+
+
+def test_builtin_scatter_preset_keeps_dot_glyphs_for_circle_texture():
+    from radio import visualizers
+
+    preset = visualizers.load_preset('scatter')
+
+    assert preset['chars'] == 'dots'
+
+
 def test_scatter_mode_uses_transient_features_instead_of_fallback_bars(monkeypatch):
     from radio import visualizer_engine
 
@@ -244,3 +291,114 @@ def test_scatter_mode_uses_transient_features_instead_of_fallback_bars(monkeypat
     )
 
     assert ''.join(rows).strip()
+
+
+def test_cathedral_scene_produces_nonempty_layered_output(monkeypatch):
+    from radio import visualizer_engine
+
+    monkeypatch.setattr(
+        visualizer_engine,
+        'load_preset',
+        lambda name=None: {
+            'name': 'cathedral',
+            'scene': 'cathedral',
+            'mode': 'cathedral',
+            'chars': 'hybrid',
+            'rows': 4,
+            'width': 16,
+            'attack': 100.0,
+            'decay': 100.0,
+            'center_boost': 0.2,
+            'mirror': True,
+            'trail': 0.2,
+            'pulse_gain': 1.0,
+            'gamma': 0.8,
+            'floor': 0.02,
+            'contrast': 1.1,
+            'detail': 1.2,
+            'blur': 0,
+        },
+    )
+    monkeypatch.setattr(
+        visualizer_engine,
+        'get_feature_snapshot',
+        lambda width, smoothing=0.0: level_meter.VisualizerFeatures(
+            levels=[0.15, 0.3, 0.55, 0.8, 1.0, 0.8, 0.55, 0.3, 0.15][:width],
+            energy=0.72,
+            peak=1.0,
+            transient=0.45,
+            motion=0.35,
+            decay=0.08,
+            active=True,
+        ),
+    )
+
+    rows = visualizer_engine.render_rows(
+        preset_name='cathedral',
+        width=16,
+        rows=4,
+        paused=False,
+        position=2.0,
+        title_seed='cathedral-seed',
+    )
+
+    assert len(rows) == 4
+    assert all(len(row) == 16 for row in rows)
+    assert ''.join(rows).strip()
+    assert len(set(''.join(rows))) > 3
+
+
+def test_plasma_scene_uses_multiple_density_levels(monkeypatch):
+    from radio import visualizer_engine
+
+    monkeypatch.setattr(
+        visualizer_engine,
+        'load_preset',
+        lambda name=None: {
+            'name': 'plasma',
+            'scene': 'plasma',
+            'mode': 'plasma',
+            'chars': 'ascii',
+            'rows': 3,
+            'width': 18,
+            'attack': 100.0,
+            'decay': 100.0,
+            'center_boost': 0.0,
+            'mirror': False,
+            'trail': 0.4,
+            'pulse_gain': 0.8,
+            'gamma': 0.7,
+            'floor': 0.02,
+            'contrast': 1.2,
+            'detail': 1.3,
+            'blur': 1,
+        },
+    )
+    monkeypatch.setattr(
+        visualizer_engine,
+        'get_feature_snapshot',
+        lambda width, smoothing=0.0: level_meter.VisualizerFeatures(
+            levels=[0.2, 0.4, 0.9, 0.7, 0.3, 0.1, 0.5, 0.85, 0.65, 0.25][:width],
+            energy=0.68,
+            peak=0.95,
+            transient=0.3,
+            motion=0.55,
+            decay=0.04,
+            active=True,
+        ),
+    )
+
+    rows = visualizer_engine.render_rows(
+        preset_name='plasma',
+        width=18,
+        rows=3,
+        paused=False,
+        position=1.5,
+        title_seed='plasma-seed',
+    )
+
+    glyphs = set(''.join(rows))
+    assert len(rows) == 3
+    assert all(len(row) == 18 for row in rows)
+    assert ''.join(rows).strip()
+    assert len(glyphs - {' '}) >= 4

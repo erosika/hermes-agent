@@ -103,52 +103,18 @@ def _noise(seed: int, idx: int) -> float:
 
 
 def _generate_bars(position: float, title: str, paused: bool) -> str:
-    """Generate compact braille visualizer bars (direct, no engine)."""
-    global _bar_levels, _peak_levels, _peak_decay, _last_title, _last_render
+    """Generate compact bars using the active visualizer preset."""
+    from radio.visualizer_engine import render_rows
 
-    if paused:
-        for i in range(_NUM_BARS):
-            _bar_levels[i] *= 0.85
-        return "".join(_braille_bar(_bar_levels[i]) for i in range(_NUM_BARS))
-
-    # Try real audio levels
-    try:
-        from radio.level_meter import get_levels, is_active
-        if is_active():
-            raw = get_levels(_NUM_BARS)
-            if len(raw) >= 3 and any(v > 0.05 for v in raw):
-                return _render_real_levels(raw)
-    except ImportError:
-        pass
-
-    # Synthetic fallback
-    if title != _last_title:
-        _last_title = title
-        _bar_levels = [0.0] * _NUM_BARS
-
-    now = time.time()
-    dt = min(now - _last_render, 0.5) if _last_render > 0 else 0.3
-    _last_render = now
-
-    title_seed = int(hashlib.md5((title or "x").encode()).hexdigest()[:8], 16)
-    pos = position if position and position > 0 else now
-
-    for i in range(_NUM_BARS):
-        freq = 1.5 + i * 0.8
-        phase = title_seed + i * 137
-        val = _noise(int(pos * freq) + phase, i) * 0.5
-        val += _noise(int(pos * freq * 2.7) + phase + 1000, i) * 0.3
-        val += _noise(int(pos * freq * 6.1) + phase + 2000, i) * 0.2
-        center = 0.6 + 0.4 * (1.0 - abs(i - _NUM_BARS / 2) / (_NUM_BARS / 2))
-        energy = 0.6 + 0.4 * math.sin(pos * 0.4 + title_seed * 0.001)
-        val = val * center * energy * 1.6 + 0.15
-
-        if val > _bar_levels[i]:
-            _bar_levels[i] += (val - _bar_levels[i]) * min(1.0, 12.0 * dt)
-        else:
-            _bar_levels[i] += (val - _bar_levels[i]) * min(1.0, 4.0 * dt)
-
-    return "".join(_braille_bar(_bar_levels[i]) for i in range(_NUM_BARS))
+    rows = render_rows(
+        preset_name=None,
+        width=_NUM_BARS,
+        rows=1,
+        paused=paused,
+        position=position or 0.0,
+        title_seed=title or "x",
+    )
+    return rows[0] if rows else ""
 
 
 def _render_real_levels(levels: List[float]) -> str:
@@ -294,9 +260,9 @@ def _get_mini_text() -> List[Tuple[str, str]]:
     fragments.append(("", "\n"))
     if control_mode:
         if is_stream:
-            fragments.append(("class:radio-control", "  Spc pause  m mute  r rec  -/+ vol  Tab size  Ctrl+O/q exit"))
+            fragments.append(("class:radio-control", "  Spc pause  m mute  r rec  -/+ vol  </> viz  Tab size  Ctrl+O/q exit"))
         else:
-            fragments.append(("class:radio-control", "  Spc pause  n skip  m mute  r rec  -/+ vol  Tab size  Ctrl+O/q exit"))
+            fragments.append(("class:radio-control", "  Spc pause  n skip  m mute  r rec  -/+ vol  </> viz  Tab size  Ctrl+O/q exit"))
     elif not is_stream and now.duration and now.duration > 0 and now.position is not None:
         pos_fmt = _format_time(now.position)
         dur_fmt = _format_time(now.duration)
@@ -331,7 +297,9 @@ _control_mode_active = False
 
 _expanded = False  # toggled by 'v' key binding in cli.py
 
-_BARS_EXPANDED = 62  # fill the 68-char box (minus 4 for borders + padding)
+_EXPANDED_PLAYER_WIDTH = 68
+_EXPANDED_PLAYER_INNER_WIDTH = _EXPANDED_PLAYER_WIDTH - 4
+_BARS_EXPANDED = _EXPANDED_PLAYER_INNER_WIDTH
 _bar_levels_exp = [0.0] * _BARS_EXPANDED
 
 
@@ -355,10 +323,11 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
         return []
 
     fragments: List[Tuple[str, str]] = []
-    W = 68  # display width (wider for full track names)
+    W = _EXPANDED_PLAYER_WIDTH
 
     # Top border
-    fragments.append(("class:radio-border", f"  \u256d{'\u2500' * (W - 2)}\u256e\n"))
+    _hline = "\u2500" * (W - 2)
+    fragments.append(("class:radio-border", f"  \u256d{_hline}\u256e\n"))
 
     # Row 1: HERMES RADIO -- TRANSMISSIONS ONLY + REC + volume
     vol = int(now.volume)
@@ -395,7 +364,7 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
     fragments.append(("class:radio-border", " \u2502\n"))
 
     # Row 2: separator
-    fragments.append(("class:radio-border", f"  \u251c{'\u2500' * (W - 2)}\u2524\n"))
+    fragments.append(("class:radio-border", f"  \u251c{_hline}\u2524\n"))
 
     # Row 3: empty line for breathing room
     fragments.append(("class:radio-border", "  \u2502"))
@@ -531,75 +500,71 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
         fragments.append(("class:radio-border", "\u2502\n"))
 
     # Bottom border
-    fragments.append(("class:radio-border", f"  \u2570{'\u2500' * (W - 2)}\u256f\n"))
+    fragments.append(("class:radio-border", f"  \u2570{_hline}\u256f\n"))
 
     return fragments
 
 
 def _generate_bars_expanded(position: float, title: str, paused: bool) -> List[str]:
-    """Generate 3 rows of wide braille visualizer bars (direct, no engine)."""
-    global _bar_levels_exp
+    """Generate expanded visualizer rows using the active preset."""
+    from radio.visualizer_engine import render_rows
+    from radio.visualizers import load_preset
 
-    n = _BARS_EXPANDED
+    preset = load_preset()
+    rows = max(1, int(preset.get('rows', 4)))
+    width = _EXPANDED_PLAYER_INNER_WIDTH
+    return render_rows(
+        preset_name=preset.get('name'),
+        width=width,
+        rows=rows,
+        paused=paused,
+        position=position or 0.0,
+        title_seed=title or "x",
+    )
 
-    # Get real or synthetic levels
-    levels = [0.0] * n
-    try:
-        from radio.level_meter import get_levels, is_active
-        if is_active():
-            raw = get_levels(n)
-            if len(raw) >= 3 and any(v > 0.05 for v in raw):
-                for i in range(n):
-                    idx = min(i, len(raw) - 1)
-                    levels[i] = raw[idx]
-                    j = _noise(int(time.time() * 3), i) * 0.12
-                    levels[i] = max(0.0, min(1.0, levels[i] + j - 0.06))
-    except ImportError:
-        pass
 
-    # Synthetic fallback if no real levels
-    if all(lv == 0.0 for lv in levels) and not paused:
-        pos = time.time()
-        title_seed = int(hashlib.md5((title or "x").encode()).hexdigest()[:8], 16)
-        for i in range(n):
-            freq = 1.2 + i * 0.5
-            phase = title_seed + i * 137
-            val = _noise(int(pos * freq) + phase, i) * 0.5
-            val += _noise(int(pos * freq * 2.7) + phase + 1000, i) * 0.3
-            val += _noise(int(pos * freq * 6.1) + phase + 2000, i) * 0.2
-            center = 0.6 + 0.4 * (1.0 - abs(i - n / 2) / (n / 2))
-            energy = 0.6 + 0.4 * math.sin(pos * 0.4 + title_seed * 0.001)
-            levels[i] = val * center * energy * 1.6 + 0.15
+def _expanded_player_height(now) -> int:
+    """Return the exact rendered line count for the expanded player."""
+    from radio.visualizers import load_preset
 
-    if paused:
-        for i in range(n):
-            _bar_levels_exp[i] *= 0.85
+    preset = load_preset()
+    visualizer_rows = max(1, int(preset.get('rows', 4)))
+
+    # Static rows: top border, header, separator, spacer, post-viz spacer,
+    # controls/hint row, progress/live row, bottom border.
+    lines = 8 + visualizer_rows
+
+    if now.source_mode == "stream":
+        if now.station_name:
+            lines += 1
+        icy_title = now.title or ""
+        if icy_title and icy_title != now.station_name:
+            lines += 1
     else:
-        dt = 0.3
-        for i in range(n):
-            val = levels[i]
-            if val > _bar_levels_exp[i]:
-                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, 12.0 * dt)
-            else:
-                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, 4.0 * dt)
+        artist = now.artist if now.artist and now.artist != "Unknown" else ""
+        if artist:
+            lines += 1
+        title = now.title or "..."
+        if title != artist:
+            lines += 1
+        if now.decade or now.country or now.mood:
+            lines += 1
 
-    # Render 3 stacked braille rows
-    rows = ["", "", ""]
-    for i in range(n):
-        stack = _braille_bar_stack(max(0.0, min(1.0, _bar_levels_exp[i])), rows=3)
-        for row_idx, ch in enumerate(stack):
-            rows[row_idx] += ch
-
-    return rows
+    return lines
 
 
 def get_mini_player_height() -> int:
-    """Return display height: 0 (inactive), 2 (mini), or 14 (expanded)."""
+    """Return display height: 0 (inactive), 2 (mini), dynamic when expanded."""
     try:
         from radio.player import HermesRadio
         if not HermesRadio.active():
             return 0
-        return 15 if _expanded else 2
+        if not _expanded:
+            return 2
+        now = HermesRadio.get().now_playing()
+        if not now.active:
+            return 0
+        return _expanded_player_height(now)
     except Exception:
         return 0
 

@@ -5,8 +5,8 @@ Built-in presets ship in this package. User presets live at
 the same name.
 
 Each preset defines:
-  - mode: bars | waveform | spectrum | mirror | scatter
-  - chars: character set to use (braille, blocks, ascii, dots)
+  - mode/scene: bars | waveform | mirror | scatter | cathedral | braille | plasma | prism | stormgrid | specter
+  - chars: character set to use (braille, blocks, ascii, dots, hybrid)
   - rows: number of vertical rows (1-6)
   - width: number of columns (16-64, or "auto" for terminal width)
   - colors: list of color hex values for gradient (top to bottom)
@@ -120,7 +120,7 @@ def _apply_defaults(data: Dict[str, Any]) -> Dict[str, Any]:
     defaults = {
         "name": data.get("name", "default"),
         "mode": "bars",
-        "chars": "braille",  # braille | blocks | ascii | dots
+        "chars": "braille",  # braille | blocks | ascii | dots | hybrid
         "rows": 3,
         "width": 32,
         "colors": ["#7eb8f6", "#9b8cf6", "#bc8cff", "#d48cff", "#bc8cff", "#9b8cf6"],
@@ -129,6 +129,14 @@ def _apply_defaults(data: Dict[str, Any]) -> Dict[str, Any]:
         "center_boost": 0.25,
         "mirror": False,
         "peak_hold": 0.0,
+        "scene": data.get("scene", data.get("mode", "bars")),
+        "gamma": 0.82,
+        "floor": 0.02,
+        "contrast": 1.08,
+        "trail": 0.28,
+        "pulse_gain": 0.8,
+        "detail": 1.0,
+        "blur": 0,
     }
     for k, v in defaults.items():
         if k not in data:

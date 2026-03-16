@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from radio import mini_player
 from radio import visualizer_engine
 from radio import visualizers
@@ -50,16 +52,57 @@ def test_generate_bars_uses_visualizer_engine(monkeypatch):
     assert bars == 'X' * 16
 
 
-def test_generate_bars_expanded_uses_visualizer_engine(monkeypatch):
+def test_generate_bars_expanded_uses_full_player_inner_width(monkeypatch):
+    expected_width = mini_player._EXPANDED_PLAYER_WIDTH - 4
+
     def fake_render_rows(**kwargs):
-        assert kwargs['width'] == 52
+        assert kwargs['width'] == expected_width
         assert kwargs['rows'] == 4
         assert kwargs['paused'] is True
-        return ['A' * 52, 'B' * 52, 'C' * 52, 'D' * 52]
+        return ['A' * expected_width, 'B' * expected_width, 'C' * expected_width, 'D' * expected_width]
 
     monkeypatch.setattr(visualizer_engine, 'render_rows', fake_render_rows)
     monkeypatch.setattr(visualizers, 'load_preset', lambda name=None: {'rows': 4})
 
     rows = mini_player._generate_bars_expanded(position=3.0, title='seed-track', paused=True)
 
-    assert rows == ['A' * 52, 'B' * 52, 'C' * 52, 'D' * 52]
+    assert rows == ['A' * expected_width, 'B' * expected_width, 'C' * expected_width, 'D' * expected_width]
+
+
+def test_expanded_player_height_matches_rendered_line_count(monkeypatch):
+    class FakeRadio:
+        @classmethod
+        def active(cls):
+            return True
+
+        @classmethod
+        def get(cls):
+            return cls()
+
+        def now_playing(self):
+            return SimpleNamespace(
+                active=True,
+                source_mode='crate',
+                title='Track',
+                artist='Artist',
+                decade=1970,
+                country='JPN',
+                mood='fast',
+                position=12.0,
+                duration=100.0,
+                volume=30,
+                paused=False,
+                station_name='Crate Digger',
+            )
+
+        @property
+        def is_recording(self):
+            return False
+
+    monkeypatch.setattr('radio.player.HermesRadio', FakeRadio)
+    monkeypatch.setattr(visualizers, 'load_preset', lambda name=None: {'name': 'wide', 'rows': 5})
+    monkeypatch.setattr(mini_player, '_expanded', True)
+
+    rendered = ''.join(text for _, text in mini_player.get_expanded_player_text())
+
+    assert mini_player.get_mini_player_height() == rendered.count('\n')
