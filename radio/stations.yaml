@@ -1,147 +1,110 @@
-# Curated world radio stations for Hermes Radio.
-# These appear in the /radio menu under STATIONS.
-# Add your own or override by editing ~/.hermes/radio/stations.yaml
+# Curated stations for Hermes Radio.
+# Override with ~/.hermes/radio/stations.yaml
 
 stations:
-  # New York
-  - name: WNYC FM 93.9
-    url: https://radio.garden/api/ara/content/listen/38SmGFvr/channel.mp3
-    region: nyc
-    genre: public radio
-
-  - name: Radio Free Brooklyn
-    url: https://radio.garden/api/ara/content/listen/H0JBE3pd/channel.mp3
-    region: nyc
-    genre: freeform
-
-  - name: Brooklyn Station
-    url: https://radio.garden/api/ara/content/listen/y7bb1OUH/channel.mp3
-    region: nyc
-    genre: community
-
-  # Paris
-  - name: France Inter
-    url: https://radio.garden/api/ara/content/listen/KbsffvuC/channel.mp3
-    region: paris
-    genre: culture
-
-  - name: Radio Orient 94.3
-    url: https://radio.garden/api/ara/content/listen/Am45pbFJ/channel.mp3
-    region: paris
-    genre: world
-
-  # Tokyo
-  - name: Ottava
-    url: https://radio.garden/api/ara/content/listen/rDch0y97/channel.mp3
-    region: tokyo
-    genre: classical
-
-  - name: Listen.moe
-    url: https://radio.garden/api/ara/content/listen/XehO7lZ3/channel.mp3
-    region: tokyo
-    genre: jpop/anime
-
-  # Seoul
-  - name: WBS FM 89.7
-    url: https://radio.garden/api/ara/content/listen/Fxz_MBpC/channel.mp3
-    region: seoul
-    genre: korean
-
-  - name: Big B Radio Kpop
-    url: https://radio.garden/api/ara/content/listen/sjd0AW7d/channel.mp3
-    region: seoul
-    genre: kpop
-
-  # China
-  - name: Hit FM Beijing 88.7
-    url: https://radio.garden/api/ara/content/listen/pUH5bBzk/channel.mp3
-    region: beijing
-    genre: pop
-
-  - name: Classical 94.7 Shanghai
-    url: https://radio.garden/api/ara/content/listen/RxoVPtQa/channel.mp3
-    region: shanghai
-    genre: classical
-
-  # India
-  - name: Kishore Kumar Radio
-    url: https://radio.garden/api/ara/content/listen/sG9ZZzTf/channel.mp3
-    region: mumbai
-    genre: bollywood
-
-  - name: Radio City Hindi
-    url: https://radio.garden/api/ara/content/listen/to5IKEqr/channel.mp3
-    region: mumbai
-    genre: hindi
-
-  # Indonesia
-  - name: Prambors FM 102.2
-    url: https://radio.garden/api/ara/content/listen/NZYf7QsQ/channel.mp3
-    region: jakarta
-    genre: pop
-
-  - name: Delta FM 99.1
-    url: https://radio.garden/api/ara/content/listen/lRazAxL1/channel.mp3
-    region: jakarta
-    genre: adult contemporary
-
-  # Egypt
-  - name: Nagham FM 105.3
-    url: https://radio.garden/api/ara/content/listen/sIA24Ez6/channel.mp3
-    region: cairo
-    genre: arabic music
-
-  - name: 9090 FM Cairo
-    url: https://radio.garden/api/ara/content/listen/k-_Hmk3Z/channel.mp3
-    region: cairo
-    genre: arabic
-
-  # Lebanon
-  - name: VDL 100.5 Beirut
-    url: https://radio.garden/api/ara/content/listen/5KYq0ltR/channel.mp3
-    region: beirut
-    genre: lebanese
-
-  # Nigeria
-  - name: Bond FM 92.9 Lagos
-    url: https://radio.garden/api/ara/content/listen/RpOv_frE/channel.mp3
-    region: lagos
-    genre: afrobeats
-
-  # Kenya
-  - name: Ghetto FM 89.5 Nairobi
-    url: https://radio.garden/api/ara/content/listen/QhG6jcSP/channel.mp3
-    region: nairobi
-    genre: urban
-
-  # Senegal
-  - name: Sud FM 98.5 Dakar
-    url: https://radio.garden/api/ara/content/listen/Z44UlSTf/channel.mp3
-    region: dakar
-    genre: mbalax
-
-  # SomaFM picks (curated underground)
+  # SomaFM underground
   - name: SomaFM DEF CON
     url: https://somafm.com/defcon256.pls
-    region: sf
-    genre: electronic
+    region: somafm
+    genre: hacker electronic
 
   - name: SomaFM Drone Zone
     url: https://somafm.com/dronezone256.pls
-    region: sf
+    region: somafm
     genre: ambient
 
   - name: SomaFM Deep Space One
     url: https://somafm.com/deepspaceone.pls
-    region: sf
-    genre: ambient
+    region: somafm
+    genre: deep ambient
 
   - name: SomaFM Vaporwaves
-    url: https://somafm.com/vaporwaves256.pls
-    region: sf
-    genre: electronic
+    url: https://somafm.com/vaporwaves.pls
+    region: somafm
+    genre: vaporwave
 
   - name: SomaFM The Dark Zone
     url: https://somafm.com/darkzone256.pls
-    region: sf
+    region: somafm
     genre: dark ambient
+
+  - name: SomaFM n5MD
+    url: https://somafm.com/n5md130.pls
+    region: somafm
+    genre: experimental electronic
+
+  - name: SomaFM cliqhop
+    url: https://somafm.com/cliqhop256.pls
+    region: somafm
+    genre: idm
+
+  # Acid / Techno
+  - name: Radio Caprice ACID HOUSE
+    url: http://79.111.119.111:8002/acid
+    region: acid
+    genre: acid house / trance
+
+  - name: Trancetechnic Radio
+    url: https://s11.ssl-stream.com/ssl/trancete?mp=/stream
+    region: acid
+    genre: acid techno
+
+  # Breakbeat / Jungle / DnB
+  - name: Kool FM
+    url: https://admin.stream.rinse.fm/proxy/kool/stream
+    region: breaks
+    genre: jungle / dnb / breakbeat
+
+  - name: UK Bass Radio
+    url: https://www.ukbassradio.com/stream
+    region: breaks
+    genre: breakbeat / garage / dubstep
+
+  - name: Rinse UK
+    url: https://admin.stream.rinse.fm/proxy/rinse_uk/stream
+    region: breaks
+    genre: grime / jungle / garage
+
+  # Chiptune / Game Music
+  - name: Retro PC Game Music
+    url: http://gyusyabu.ddo.jp:8000/listen.pls
+    region: game
+    genre: retro game soundtracks
+
+  - name: Gamesboro Radio
+    url: https://radio.gamesboro.org/listen/gamesboro_radio/radio.mp3
+    region: game
+    genre: vgm 24/7
+
+  # Vaporwave / Lo-fi
+  - name: Nightwave Plaza
+    url: https://radio.plaza.one/ogg
+    region: vapor
+    genre: vaporwave / future funk
+
+  # Dark / Industrial / Experimental
+  - name: Drone Radio
+    url: http://listen.mrg.fm:8070/stream
+    region: dark
+    genre: drone / deep ambient
+
+  - name: SoundWorks Radio
+    url: https://soundworks.live/listen/soundworks/radio.mp3
+    region: dark
+    genre: darkwave / ebm / industrial
+
+  - name: RADCAP Dark Ambient
+    url: http://79.120.39.202:8000/darkambient
+    region: dark
+    genre: ritual / dark ambient
+
+  # Dub Techno
+  - name: Radio Schizoid Dub Techno
+    url: http://94.130.113.214:8000/dubtechno
+    region: dub
+    genre: dub techno
+
+  - name: Radio Caprice Dub Techno
+    url: http://79.120.39.202:8000/dubtechno
+    region: dub
+    genre: dub techno

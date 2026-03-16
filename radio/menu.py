@@ -352,39 +352,44 @@ def build_menu_items(
 
     items: List[MenuItem] = []
 
-    # Now playing
+    # Now playing (if active)
     if now_playing and now_playing.get("active"):
         items.append(MenuItem(label="NOW PLAYING", is_header=True))
         title = now_playing.get("title", "")
         artist = now_playing.get("artist", "")
-        display = f"{artist} — {title}" if artist else title
-        prefix = "▶" if not now_playing.get("paused") else "⏸"
+        display = f"{artist} \u2014 {title}" if artist else title
+        prefix = "\u25b6" if not now_playing.get("paused") else "\u23f8"
         items.append(MenuItem(label=f"{prefix} {display}", sublabel=now_playing.get("station_name", ""), action="toggle_pause"))
         items.append(MenuItem(label="Skip track", action="skip"))
         items.append(MenuItem(label="Stop radio", action="stop"))
 
-    # Visualizer presets near the top so they are easy to discover
-    visualizer_names = list_presets()
-    if visualizer_names:
-        items.append(MenuItem(label="VISUALIZER", is_header=True))
-        for name in visualizer_names:
-            sublabel = "active" if name == active_visualizer else ""
-            items.append(MenuItem(
-                label=name,
-                sublabel=sublabel,
-                action="visualizer",
-                data={"name": name},
-            ))
+    # Recently listened (at the top for quick re-tune)
+    try:
+        from radio.config import get_recent_stations
+        recent = get_recent_stations()
+        if recent:
+            items.append(MenuItem(label="RECENT", is_header=True))
+            for station in recent:
+                name = station.get("name", "?")
+                if name and name != "?":
+                    items.append(MenuItem(
+                        label=name,
+                        sublabel=station.get("source", "stream"),
+                        action="stream",
+                        data={"url": station.get("url", ""), "name": name},
+                    ))
+    except Exception:
+        pass
 
-    # Crate digger (opens config sub-menu on select)
+    # Crate digger (opens config sub-menu)
     items.append(MenuItem(label="CRATE DIGGER", is_header=True))
     items.append(MenuItem(label="Crate Digger", sublabel="configure + start", action="crate"))
-    # Curated world stations (from stations.yaml)
+
+    # Curated stations (from stations.yaml -- SomaFM + niche)
     try:
         from radio.stations import load_stations
         curated = load_stations()
         if curated:
-            # Group by region
             regions_seen = []
             for station in curated:
                 region = station.get("region", "").upper()
@@ -400,33 +405,31 @@ def build_menu_items(
     except Exception:
         pass
 
-    # SomaFM (if no curated stations loaded, or as additional)
-    if soma_channels and not curated:
-        items.append(MenuItem(label="SOMAFM", is_header=True))
-        for ch in soma_channels:
-            items.append(MenuItem(label=ch.get("title", ch.get("id", "?")), sublabel=ch.get("genre", ""), action="somafm", data={"channel_id": ch.get("id", "")}))
+    # SomaFM as fallback if no curated loaded
+    if soma_channels:
+        try:
+            from radio.stations import load_stations
+            if not load_stations():
+                items.append(MenuItem(label="SOMAFM", is_header=True))
+                for ch in soma_channels:
+                    items.append(MenuItem(label=ch.get("title", ch.get("id", "?")), sublabel=ch.get("genre", ""), action="somafm", data={"channel_id": ch.get("id", "")}))
+        except Exception:
+            items.append(MenuItem(label="SOMAFM", is_header=True))
+            for ch in soma_channels:
+                items.append(MenuItem(label=ch.get("title", ch.get("id", "?")), sublabel=ch.get("genre", ""), action="somafm", data={"channel_id": ch.get("id", "")}))
 
-    # Presets
-    if presets:
-        items.append(MenuItem(label="PRESETS", is_header=True))
-        for name, preset in presets.items():
-            items.append(MenuItem(label=name, sublabel=preset.get("source", ""), action="preset", data={"name": name, **preset}))
+    # Search
+    items.append(MenuItem(label="SEARCH", is_header=True))
+    items.append(MenuItem(label="Search Radio Browser", sublabel="45k+ stations", action="search_rb"))
+    items.append(MenuItem(label="Search Radio Garden", sublabel="by city", action="search_rg"))
 
-    # Recently listened
-    try:
-        from radio.config import get_recent_stations
-        recent = get_recent_stations()
-        if recent:
-            items.append(MenuItem(label="RECENT", is_header=True))
-            for station in recent:
-                items.append(MenuItem(
-                    label=station.get("name", "?"),
-                    sublabel=station.get("source", "stream"),
-                    action="stream",
-                    data={"url": station.get("url", ""), "name": station.get("name", "")},
-                ))
-    except Exception:
-        pass
+    # Visualizer
+    visualizer_names = list_presets()
+    if visualizer_names:
+        items.append(MenuItem(label="VISUALIZER", is_header=True))
+        for name in visualizer_names:
+            sublabel = "active" if name == active_visualizer else ""
+            items.append(MenuItem(label=name, sublabel=sublabel, action="visualizer", data={"name": name}))
 
     # Search
     items.append(MenuItem(label="SEARCH", is_header=True))
