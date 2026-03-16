@@ -536,149 +536,61 @@ def get_expanded_player_text() -> List[Tuple[str, str]]:
     return fragments
 
 
-# Neurovision-inspired density ramp (from sparse to dense)
-_DENSITY = " ·:+*#@"
-_DENSITY_BRAILLE = " \u2801\u2803\u2807\u280f\u281f\u283f\u28ff"  # braille density
-
-# Persistent field state for the expanded visualizer
-_field = None  # 2D array [rows][cols] of floats
-_field_energy = 0.0
-_pulse_rings: list = []  # [(cx, cy, radius, intensity, birth_time)]
-
-
 def _generate_bars_expanded(position: float, title: str, paused: bool) -> List[str]:
-    """Generate a multi-layer audio-reactive field visualization.
-
-    Layers:
-    1. Background noise field that breathes with energy
-    2. Frequency band columns (amplitude as density)
-    3. Pulse rings expanding from center on transients
-    4. Particle scatter on high energy
-    """
-    global _bar_levels_exp, _field, _field_energy, _pulse_rings
+    """Generate 3 rows of wide braille visualizer bars (direct, no engine)."""
+    global _bar_levels_exp
 
     n = _BARS_EXPANDED
-    rows = 3
-    cols = n
 
-    # Initialize field
-    if _field is None or len(_field) != rows or len(_field[0]) != cols:
-        _field = [[0.0] * cols for _ in range(rows)]
-
-    # Get audio levels
-    levels = [0.0] * cols
-    has_real = False
+    # Get real or synthetic levels
+    levels = [0.0] * n
     try:
         from radio.level_meter import get_levels, is_active
         if is_active():
-            raw = get_levels(cols)
+            raw = get_levels(n)
             if len(raw) >= 3 and any(v > 0.05 for v in raw):
-                has_real = True
-                for i in range(cols):
+                for i in range(n):
                     idx = min(i, len(raw) - 1)
                     levels[i] = raw[idx]
+                    j = _noise(int(time.time() * 3), i) * 0.12
+                    levels[i] = max(0.0, min(1.0, levels[i] + j - 0.06))
     except ImportError:
         pass
 
-    now = time.time()
-    title_seed = int(hashlib.md5((title or "x").encode()).hexdigest()[:8], 16)
-
-    # Synthetic levels if no real audio
-    if not has_real and not paused:
-        for i in range(cols):
+    # Synthetic fallback if no real levels
+    if all(lv == 0.0 for lv in levels) and not paused:
+        pos = time.time()
+        title_seed = int(hashlib.md5((title or "x").encode()).hexdigest()[:8], 16)
+        for i in range(n):
             freq = 1.2 + i * 0.5
             phase = title_seed + i * 137
-            val = _noise(int(now * freq) + phase, i) * 0.5
-            val += _noise(int(now * freq * 2.7) + phase + 1000, i) * 0.3
-            val += _noise(int(now * freq * 6.1) + phase + 2000, i) * 0.2
-            center = 0.6 + 0.4 * (1.0 - abs(i - cols / 2) / (cols / 2))
-            energy = 0.6 + 0.4 * math.sin(now * 0.4 + title_seed * 0.001)
+            val = _noise(int(pos * freq) + phase, i) * 0.5
+            val += _noise(int(pos * freq * 2.7) + phase + 1000, i) * 0.3
+            val += _noise(int(pos * freq * 6.1) + phase + 2000, i) * 0.2
+            center = 0.6 + 0.4 * (1.0 - abs(i - n / 2) / (n / 2))
+            energy = 0.6 + 0.4 * math.sin(pos * 0.4 + title_seed * 0.001)
             levels[i] = val * center * energy * 1.6 + 0.15
 
-    # Smooth levels
-    if len(_bar_levels_exp) != cols:
-        _bar_levels_exp = [0.0] * cols
     if paused:
-        for i in range(cols):
-            _bar_levels_exp[i] *= 0.9
+        for i in range(n):
+            _bar_levels_exp[i] *= 0.85
     else:
-        for i in range(cols):
+        dt = 0.3
+        for i in range(n):
             val = levels[i]
             if val > _bar_levels_exp[i]:
-                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * 0.7
+                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, 12.0 * dt)
             else:
-                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * 0.3
+                _bar_levels_exp[i] += (val - _bar_levels_exp[i]) * min(1.0, 4.0 * dt)
 
-    # Compute overall energy
-    avg_level = sum(_bar_levels_exp) / max(1, cols)
-    _field_energy = _field_energy * 0.7 + avg_level * 0.3
+    # Render 3 stacked braille rows
+    rows = ["", "", ""]
+    for i in range(n):
+        stack = _braille_bar_stack(max(0.0, min(1.0, _bar_levels_exp[i])), rows=3)
+        for row_idx, ch in enumerate(stack):
+            rows[row_idx] += ch
 
-    # Detect transients (sudden energy increase = pulse)
-    if avg_level > _field_energy * 1.4 and avg_level > 0.2:
-        cx = cols // 2 + int(_noise(int(now * 7), 99) * 10 - 5)
-        cy = rows // 2
-        _pulse_rings.append((cx, cy, 0.0, avg_level, now))
-
-    # Layer 1: Background noise field (breathes with energy)
-    for r in range(rows):
-        for c in range(cols):
-            # Multi-octave noise
-            t = now * 0.8
-            n1 = _noise(int(t * 1.3 + c * 0.7) + r * 100, c + r * cols) * 0.3
-            n2 = _noise(int(t * 2.1 + c * 1.1) + r * 200 + 5000, c + r * cols) * 0.2
-            bg = (n1 + n2) * _field_energy * 2.0
-            _field[r][c] = max(0.0, bg)
-
-    # Layer 2: Frequency columns (amplitude mapped to density per row)
-    for c in range(cols):
-        amp = _bar_levels_exp[c]
-        # Bottom row gets most, top row gets least (like bars rising)
-        for r in range(rows):
-            row_threshold = (rows - 1 - r) / rows  # 0.66, 0.33, 0.0
-            if amp > row_threshold:
-                intensity = (amp - row_threshold) * 2.0
-                _field[r][c] = max(_field[r][c], intensity)
-
-    # Layer 3: Pulse rings (expanding circles from transients)
-    alive_rings = []
-    for cx, cy, radius, intensity, birth in _pulse_rings:
-        age = now - birth
-        if age > 1.5:
-            continue
-        alive_rings.append((cx, cy, radius + age * 15, intensity * (1.0 - age / 1.5), birth))
-        # Draw ring
-        r_now = radius + age * 15
-        fade = intensity * (1.0 - age / 1.5)
-        for r in range(rows):
-            for c in range(cols):
-                dist = math.sqrt((c - cx) ** 2 + ((r - cy) * 4) ** 2)
-                ring_val = max(0.0, 1.0 - abs(dist - r_now) / 3.0) * fade
-                _field[r][c] = min(1.0, _field[r][c] + ring_val * 0.5)
-    _pulse_rings = alive_rings
-
-    # Layer 4: Particle scatter on high energy
-    if _field_energy > 0.3 and not paused:
-        particle_count = int(_field_energy * 8)
-        phase = int(now * 5)
-        for p in range(particle_count):
-            pc = int(_noise(f"{title_seed}:px:{phase}", p) * cols) % cols
-            pr = int(_noise(f"{title_seed}:py:{phase}", p) * rows) % rows
-            pv = 0.3 + 0.5 * _noise(f"{title_seed}:pv:{phase}", p)
-            _field[pr][pc] = min(1.0, _field[pr][pc] + pv)
-
-    # Render field to characters using density ramp
-    output = []
-    ramp = _DENSITY_BRAILLE
-    ramp_max = len(ramp) - 1
-    for r in range(rows):
-        row_str = ""
-        for c in range(cols):
-            val = max(0.0, min(1.0, _field[r][c]))
-            idx = int(val * ramp_max)
-            row_str += ramp[idx]
-        output.append(row_str)
-
-    return output
+    return rows
 
 
 def get_mini_player_height() -> int:
