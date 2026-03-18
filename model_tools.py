@@ -24,6 +24,7 @@ import json
 import asyncio
 import os
 import logging
+import time
 from typing import Dict, Any, List, Optional, Tuple
 
 from tools.registry import registry
@@ -95,6 +96,7 @@ def _discover_tools():
         "tools.send_message_tool",
         "tools.honcho_tools",
         "tools.homeassistant_tool",
+        "tools.audit_tool",
     ]
     import importlib
     for mod_name in _modules:
@@ -350,6 +352,8 @@ def handle_function_call(
         except Exception:
             pass
 
+        _t0 = time.monotonic()
+
         if function_name == "execute_code":
             # Prefer the caller-provided list so subagents can't overwrite
             # the parent's tool set via the process-global.
@@ -370,9 +374,44 @@ def handle_function_call(
                 honcho_session_key=honcho_session_key,
             )
 
+        _elapsed_ms = (time.monotonic() - _t0) * 1000
+
         try:
             from hermes_cli.plugins import invoke_hook
             invoke_hook("post_tool_call", tool_name=function_name, args=function_args, result=result, task_id=task_id or "")
+        except Exception:
+            pass
+
+        # Audit log: record every tool call with timing
+        try:
+            from agent.audit import log_tool_call, emit
+            log_tool_call(
+                tool_name=function_name,
+                args=function_args,
+                result=result,
+                duration_ms=round(_elapsed_ms, 1),
+            )
+            # Also emit a subsystem-specific event for honcho/memory tools
+            if function_name.startswith("honcho_"):
+                emit(
+                    "honcho.tool_call",
+                    tool=function_name,
+                    args=function_args,
+                    result_preview=result[:500] if result else "",
+                )
+            elif function_name == "memory":
+                emit(
+                    "memory.tool_call",
+                    action=function_args.get("action", ""),
+                    target=function_args.get("target", ""),
+                    content_preview=(function_args.get("content", "") or "")[:200],
+                )
+            elif function_name == "session_search":
+                emit(
+                    "session.search",
+                    query=function_args.get("query", ""),
+                    result_preview=result[:300] if result else "",
+                )
         except Exception:
             pass
 
@@ -381,6 +420,12 @@ def handle_function_call(
     except Exception as e:
         error_msg = f"Error executing {function_name}: {str(e)}"
         logger.error(error_msg)
+        # Audit log: record tool errors
+        try:
+            from agent.audit import log_tool_call
+            log_tool_call(tool_name=function_name, args=function_args, error=error_msg)
+        except Exception:
+            pass
         return json.dumps({"error": error_msg}, ensure_ascii=False)
 
 
