@@ -3847,6 +3847,428 @@ For more help on a command:
     sessions_parser.set_defaults(func=cmd_sessions)
 
     # =========================================================================
+    # tail command
+    # =========================================================================
+    tail_parser = subparsers.add_parser(
+        "tail",
+        help="Live-tail the audit log (tool calls, API requests, honcho ops)",
+        description="Stream the structured audit log for the current or latest session"
+    )
+    tail_parser.add_argument("--raw", action="store_true", help="Print raw JSONL instead of formatted output")
+    tail_parser.add_argument("--type", dest="event_type", help="Filter by event type (api.request, tool.call, etc.)")
+    tail_parser.add_argument("--session", dest="tail_session", help="Show events for a specific session (from SQLite or JSONL file)")
+
+    def _format_tool_detail(tool: str, d: dict) -> str:
+        """Format rich detail from audit tool.call events for tail output."""
+        if not d:
+            return ""
+        if tool == "terminal":
+            cmd = d.get("command", "")[:60]
+            ec = d.get("exit_code")
+            ec_str = f" exit={ec}" if ec is not None else ""
+            return f"{cmd}{ec_str}"
+        if tool == "execute_code":
+            preview = d.get("code_preview", "")[:50]
+            ec = d.get("exit_code")
+            ec_str = f" exit={ec}" if ec is not None else ""
+            return f"{preview}{ec_str}"
+        if tool == "read_file":
+            path = d.get("path", "")
+            sz = d.get("result_bytes")
+            sz_str = f" {sz}b" if sz else ""
+            return f"{path}{sz_str}"
+        if tool == "write_file":
+            path = d.get("path", "")
+            sz = d.get("content_bytes", 0)
+            return f"{path} {sz}b"
+        if tool in ("patch", "patch_file"):
+            path = d.get("path", "")
+            mode = d.get("mode", "replace")
+            if mode == "replace":
+                old_b = d.get("old_bytes", 0)
+                new_b = d.get("new_bytes", 0)
+                return f"{path} -{old_b}b +{new_b}b"
+            else:
+                diff_b = d.get("diff_bytes", 0)
+                return f"{path} patch {diff_b}b"
+        if tool == "search_files":
+            return d.get("query", "") or d.get("path", "")
+        if tool in ("fetch_url", "browser_navigate", "web_search"):
+            return d.get("url", "") or d.get("query", "")
+        if tool.startswith("honcho_"):
+            return d.get("query", "") or d.get("conclusion", "")
+        if tool.startswith("mcp_"):
+            server = d.get("mcp_server", "")
+            method = d.get("mcp_method", "")
+            args_d = d.get("args", {})
+            arg_preview = " ".join(f"{k}={v[:30]}" for k, v in list(args_d.items())[:3]) if args_d else ""
+            label = f"{server}.{method}" if server and method else d.get("mcp_tool", "")
+            return f"{label}  {arg_preview}".strip()
+        if tool == "send_message":
+            return f"{d.get('platform', '')} {d.get('chat_id', '')}"
+        if tool == "memory":
+            return f"{d.get('action', '')} {d.get('content', '')}"[:60]
+        if tool == "todo":
+            return f"{d.get('action', '')} {d.get('item', '')}"[:60]
+        # Fallback: show first non-empty value
+        for v in d.values():
+            if v:
+                return str(v)[:60]
+        return ""
+
+    _last_session_tag = [None]  # mutable to allow closure update
+
+    def _format_audit_line(e: dict) -> str:
+        """Format a single audit event dict into a terminal-friendly line."""
+        etype = e.get("type", "?")
+        ts = e.get("iso", "")[11:19]  # HH:MM:SS only
+        # Short session tag (last 6 chars of session ID)
+        sid_full = e.get("session", e.get("session_id", ""))
+        stag = sid_full[-6:] if sid_full else "------"
+        # Separator when session changes
+        prefix = ""
+        if _last_session_tag[0] is not None and stag != _last_session_tag[0]:
+            prefix = f"--- {sid_full} ---\n"
+        _last_session_tag[0] = stag
+
+        if etype == "api.request":
+            model = e.get("model", "")
+            tokens = e.get("total_tokens", 0)
+            cost = e.get("cost_usd")
+            dur = e.get("duration_ms")
+            cost_str = f"${cost:.4f}" if cost else ""
+            dur_str = f"{dur:.0f}ms" if dur else ""
+            body = f"api      {model:<26} {tokens:>6} tok  {cost_str:>8}  {dur_str}"
+        elif etype == "tool.call":
+            tool = e.get("tool", "")
+            dur = e.get("duration_ms")
+            dur_str = f"{dur:.0f}ms" if dur else ""
+            d = e.get("detail", {})
+            info = _format_tool_detail(tool, d)
+            body = f"tool     {tool:<20} {dur_str:>6}  {info}"
+        elif etype == "tool.error":
+            tool = e.get("tool", "")
+            err = e.get("error", "")[:60]
+            body = f"error    {tool:<20}         {err}"
+        elif etype == "honcho.operation":
+            op = e.get("operation", "")
+            body = f"honcho   {op}"
+        elif etype == "honcho.init":
+            ws = e.get("workspace", "")
+            mode = e.get("memory_mode", "")
+            recall = e.get("recall_mode", "")
+            ok = "enabled" if e.get("enabled") else "disabled"
+            body = f"honcho   init {ok}  ws={ws} mode={mode} recall={recall}"
+        elif etype == "honcho.context_injected":
+            sections = e.get("sections", [])
+            total = e.get("total_chars", 0)
+            body = f"honcho   context injected  {total} chars  [{', '.join(sections)}]"
+        elif etype == "honcho.tool_call":
+            tool = e.get("tool", "")
+            preview = e.get("result_preview", "")[:80]
+            body = f"honcho   {tool}  {preview}"
+        elif etype == "memory.loaded":
+            mc = e.get("memory_chars", 0)
+            uc = e.get("user_profile_chars", 0)
+            body = f"memory   loaded  memory={mc} chars  user={uc} chars"
+        elif etype == "memory.tool_call":
+            action = e.get("action", "")
+            target = e.get("target", "")
+            preview = e.get("content_preview", "")[:60]
+            body = f"memory   {action} ({target})  {preview}"
+        elif etype == "context.assembled":
+            layers = e.get("layers", [])
+            total = e.get("total_chars", 0)
+            body = f"context  assembled  {total} chars  [{', '.join(layers)}]"
+        elif etype == "context.compression":
+            phase = e.get("phase", "")
+            if phase == "start":
+                msgs = e.get("message_count", 0)
+                tok = e.get("approx_tokens_before", "?")
+                body = f"context  compression start  {msgs} msgs  ~{tok} tok"
+            else:
+                before = e.get("messages_before", 0)
+                after = e.get("messages_after", 0)
+                body = f"context  compression end  {before} \u2192 {after} msgs"
+        elif etype == "session.search":
+            query = e.get("query", "")[:60]
+            body = f"session  search  q={query}"
+        elif etype == "cron.run":
+            job = e.get("job_name", "")
+            ok = "ok" if e.get("success") else "FAIL"
+            body = f"cron     {job:<26} {ok}"
+        elif etype == "user.message":
+            chars = e.get("chars", 0)
+            turn = e.get("turn", 0)
+            body = f"user     turn {turn}  {chars} chars"
+        elif etype.startswith("honcho."):
+            sub = etype.split(".", 1)[1]
+            if sub == "write" and e.get("operation"):
+                sub = e["operation"]
+            parts = []
+            if e.get("user_chars"):
+                parts.append(f"user={e['user_chars']} chars")
+            if e.get("assistant_chars"):
+                parts.append(f"assistant={e['assistant_chars']} chars")
+            if e.get("message_count"):
+                parts.append(f"msgs={e['message_count']}")
+            if e.get("content_chars"):
+                parts.append(f"{e['content_chars']} chars")
+            if e.get("source_dir") or e.get("mem_dir"):
+                parts.append(e.get("source_dir") or e.get("mem_dir", ""))
+            detail = "  ".join(parts)
+            body = f"honcho   {sub:<16} {detail}"
+        elif etype == "session.start":
+            model = e.get("model", "")
+            platform = e.get("platform", "")
+            body = f"start    {sid_full}  {model} ({platform})"
+        elif etype == "session.end":
+            log_path = e.get("log_path", "")
+            suffix = f"  {log_path}" if log_path else ""
+            body = f"end      {sid_full}{suffix}"
+        else:
+            body = f"{etype:<9}"
+
+        return f"{prefix}{ts}  {stag}  {body}"
+
+    def cmd_tail(args):
+        import subprocess
+        import sys
+        from agent.audit import get_audit_dir
+
+        # --session mode: show historical events for a session
+        if getattr(args, "tail_session", None):
+            from agent.audit import query_events
+            events = query_events(session_id=args.tail_session, event_type=args.event_type, limit=10000)
+            if not events:
+                print(f"No events found for session {args.tail_session}")
+                return
+            # SQLite returns reverse-chronological; flip for display
+            events.reverse()
+            for e in events:
+                if args.raw:
+                    print(json.dumps(e, ensure_ascii=False, default=str))
+                else:
+                    print(_format_audit_line(e))
+            return
+
+        audit_dir = get_audit_dir()
+        latest = audit_dir / "latest.jsonl"
+
+        if not latest.exists():
+            audit_dir.mkdir(parents=True, exist_ok=True)
+            print("Waiting for a hermes session to start...")
+            import time as _time
+            try:
+                while not latest.exists():
+                    _time.sleep(0.3)
+            except KeyboardInterrupt:
+                return
+
+        if args.raw:
+            # Raw JSONL -- pipe-friendly
+            if args.event_type:
+                cmd = ["tail", "-n", "0", "-F", str(latest)]
+                print(f"Filtering for {args.event_type} events...\n", file=sys.stderr)
+            else:
+                cmd = ["tail", "-n", "0", "-F", str(latest)]
+            try:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
+                for line in proc.stdout:
+                    if args.event_type:
+                        try:
+                            rec = json.loads(line)
+                            if rec.get("type") != args.event_type:
+                                continue
+                        except Exception:
+                            continue
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+            except KeyboardInterrupt:
+                pass
+            return
+
+        # Formatted output
+        try:
+            proc = subprocess.Popen(
+                ["tail", "-n", "0", "-F", str(latest)],
+                stdout=subprocess.PIPE, text=True,
+            )
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except Exception:
+                    continue
+
+                etype = e.get("type", "?")
+                if args.event_type and etype != args.event_type:
+                    continue
+
+                print(_format_audit_line(e))
+                sys.stdout.flush()
+        except KeyboardInterrupt:
+            pass
+
+    import json
+    tail_parser.set_defaults(func=cmd_tail)
+
+    # =========================================================================
+    # audit command
+    # =========================================================================
+    audit_parser = subparsers.add_parser(
+        "audit",
+        help="Query and explore the structured audit log",
+        description="Search, filter, and export audit events across all sessions"
+    )
+    audit_parser.add_argument("action", nargs="?", default=None, help="Sub-action: 'sessions' to list sessions")
+    audit_parser.add_argument("--type", dest="event_type", help="Filter by event type (api.request, tool.call, etc.)")
+    audit_parser.add_argument("--tool", dest="tool_name", help="Filter by tool name (terminal, read_file, etc.)")
+    audit_parser.add_argument("--source", dest="source_filter", help="Filter by source (core, honcho, mcp, cron, skill, plugin)")
+    audit_parser.add_argument("--session", dest="session_id", help="Filter by session ID")
+    audit_parser.add_argument("--after", help="Show events after this date (ISO format, e.g. 2024-01-01)")
+    audit_parser.add_argument("--before", help="Show events before this date (ISO format, e.g. 2024-12-31)")
+    audit_parser.add_argument("--keyword", help="Full-text search in event payloads")
+    audit_parser.add_argument("--user", dest="user_id", help="Filter by user ID")
+    audit_parser.add_argument("-n", "--limit", type=int, default=20, help="Number of results to show (default: 20)")
+    audit_parser.add_argument("--export", choices=["json", "csv"], help="Export as JSONL or CSV")
+
+    def cmd_audit(args):
+        import sys
+        from datetime import datetime
+        from agent.audit import query_events, list_sessions, export_events, audit_summary, audit_problems
+
+        # Sub-action: summary
+        if args.action == "summary":
+            after_epoch = None
+            before_epoch = None
+            if args.after:
+                try:
+                    after_epoch = datetime.fromisoformat(args.after).timestamp()
+                except ValueError:
+                    pass
+            if args.before:
+                try:
+                    before_epoch = datetime.fromisoformat(args.before).timestamp()
+                except ValueError:
+                    pass
+            s = audit_summary(session_id=args.session_id, after=after_epoch, before=before_epoch)
+            if s.get("total", 0) == 0:
+                print("No audit events found.")
+                return
+            import time as _time
+            first = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(s["first_event"])) if s.get("first_event") else "?"
+            last = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(s["last_event"])) if s.get("last_event") else "?"
+            print(f"Audit summary  {first} -- {last}  ({s['sessions']} sessions)")
+            print(f"  Events: {s['total']}  API: {s['api_calls']}  Tools: {s['tool_calls']}  Errors: {s['errors']} ({s['error_rate']}%)")
+            print(f"  Tokens: {s['total_tokens']:,}  (prompt {s['prompt_tokens']:,}  completion {s['completion_tokens']:,})")
+            if s["total_cost_usd"] > 0:
+                print(f"  Cost: ${s['total_cost_usd']:.4f}")
+            if s.get("top_tools"):
+                print("  Top tools:")
+                for t in s["top_tools"]:
+                    print(f"    {t['tool']:<24} {t['count']:>4} calls  avg {t['avg_ms']}ms")
+            if s.get("top_errors"):
+                print("  Top errors:")
+                for e in s["top_errors"]:
+                    print(f"    {e['error']:<60} x{e['count']}")
+            return
+
+        # Sub-action: problems
+        if args.action == "problems":
+            after_epoch = None
+            before_epoch = None
+            if args.after:
+                try:
+                    after_epoch = datetime.fromisoformat(args.after).timestamp()
+                except ValueError:
+                    pass
+            if args.before:
+                try:
+                    before_epoch = datetime.fromisoformat(args.before).timestamp()
+                except ValueError:
+                    pass
+            findings = audit_problems(session_id=args.session_id, after=after_epoch, before=before_epoch)
+            if not findings:
+                print("No problems detected.")
+                return
+            print(f"{len(findings)} problem{'s' if len(findings) != 1 else ''} detected:\n")
+            for f in findings:
+                print(f"  {f['rule']:<26} {f['message']}")
+            return
+
+        # Sub-action: list sessions
+        if args.action == "sessions":
+            sessions = list_sessions()
+            if not sessions:
+                print("No audit sessions found.")
+                return
+            # Format as table
+            print(f"{'Session ID':<40} {'Events':>7} {'First Event':<20} {'Last Event':<20}")
+            print("-" * 90)
+            import time as _time
+            for s in sessions:
+                sid = s.get("session_id", "?")
+                count = s.get("event_count", 0)
+                first = s.get("first_event")
+                last = s.get("last_event")
+                first_str = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(first)) if first else "?"
+                last_str = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(last)) if last else "?"
+                print(f"{sid:<40} {count:>7} {first_str:<20} {last_str:<20}")
+            return
+
+        # Export mode
+        if args.export:
+            fmt = "csv" if args.export == "csv" else "jsonl"
+            output = export_events(session_id=args.session_id, format=fmt)
+            if output:
+                print(output)
+            else:
+                print("No events to export.", file=sys.stderr)
+            return
+
+        # Parse date filters
+        after_epoch = None
+        before_epoch = None
+        for attr, name in [(args.after, "after"), (args.before, "before")]:
+            if not attr:
+                continue
+            try:
+                ts = datetime.fromisoformat(attr).timestamp()
+                if name == "after":
+                    after_epoch = ts
+                else:
+                    before_epoch = ts
+            except ValueError:
+                print(f"Cannot parse date: {attr}", file=sys.stderr)
+                return
+
+        # Query events
+        events = query_events(
+            session_id=args.session_id,
+            event_type=args.event_type,
+            tool_name=args.tool_name,
+            source=getattr(args, "source_filter", None),
+            keyword=args.keyword,
+            user_id=args.user_id,
+            after=after_epoch,
+            before=before_epoch,
+            limit=args.limit,
+        )
+
+        if not events:
+            print("No matching audit events found.")
+            return
+
+        # Display events (most recent first from SQLite, reverse for chronological)
+        for e in events:
+            print(_format_audit_line(e))
+
+    audit_parser.set_defaults(func=cmd_audit)
+
+    # =========================================================================
     # insights command
     # =========================================================================
     insights_parser = subparsers.add_parser(
