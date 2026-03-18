@@ -26,7 +26,7 @@ from typing import Dict, Any, List, Optional
 
 DEFAULT_DB_PATH = Path(os.getenv("HERMES_HOME", Path.home() / ".hermes")) / "state.db"
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -76,10 +76,29 @@ CREATE TABLE IF NOT EXISTS messages (
     finish_reason TEXT
 );
 
+CREATE TABLE IF NOT EXISTS audit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT,
+    ts REAL NOT NULL,
+    iso TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    tool TEXT,
+    user_id TEXT,
+    platform TEXT,
+    detail TEXT,
+    duration_ms REAL,
+    error TEXT,
+    payload TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_audit_tool ON audit_events(tool);
 """
 
 FTS_SQL = """
@@ -102,7 +121,6 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
     INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
 END;
 """
-
 
 class SessionDB:
     """
@@ -189,6 +207,25 @@ class SessionDB:
                     except sqlite3.OperationalError:
                         pass
                 cursor.execute("UPDATE schema_version SET version = 5")
+            if current_version < 6:
+                # v6: add audit_events table
+                for stmt in [
+                    """CREATE TABLE IF NOT EXISTS audit_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT, ts REAL NOT NULL, iso TEXT NOT NULL,
+                        event_type TEXT NOT NULL, tool TEXT, user_id TEXT,
+                        platform TEXT, detail TEXT, duration_ms REAL,
+                        error TEXT, payload TEXT NOT NULL)""",
+                    "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(ts DESC)",
+                    "CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_events(session_id)",
+                    "CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(event_type)",
+                    "CREATE INDEX IF NOT EXISTS idx_audit_tool ON audit_events(tool)",
+                ]:
+                    try:
+                        cursor.execute(stmt)
+                    except sqlite3.OperationalError:
+                        pass
+                cursor.execute("UPDATE schema_version SET version = 6")
 
         # Unique title index — always ensure it exists (safe to run after migrations
         # since the title column is guaranteed to exist at this point)
@@ -950,3 +987,162 @@ class SessionDB:
 
             self._conn.commit()
         return len(session_ids)
+
+    # =========================================================================
+    # Audit events
+    # =========================================================================
+
+    def insert_audit_event(
+        self,
+        session_id: str,
+        ts: float,
+        iso: str,
+        event_type: str,
+        tool: Optional[str],
+        user_id: Optional[str],
+        platform: Optional[str],
+        detail: Optional[str],
+        duration_ms: Optional[float],
+        error: Optional[str],
+        payload_json: str,
+        *,
+        commit: bool = True,
+    ) -> None:
+        """Insert a single audit event.
+
+        Set ``commit=False`` when batching multiple inserts — the caller
+        is responsible for calling :meth:`commit_audit_batch` afterwards.
+        """
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO audit_events
+                   (session_id, ts, iso, event_type, tool, user_id, platform,
+                    detail, duration_ms, error, payload)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id, ts, iso, event_type, tool, user_id, platform,
+                    detail, duration_ms, error, payload_json,
+                ),
+            )
+            if commit:
+                self._conn.commit()
+
+    def commit_audit_batch(self) -> None:
+        """Commit a batch of audit events inserted with ``commit=False``."""
+        with self._lock:
+            self._conn.commit()
+
+    def count_audit_events(self, session_id: Optional[str] = None) -> int:
+        """Return the total number of audit events, optionally filtered by session."""
+        with self._lock:
+            if session_id:
+                cursor = self._conn.execute(
+                    "SELECT COUNT(*) FROM audit_events WHERE session_id = ?",
+                    (session_id,),
+                )
+            else:
+                cursor = self._conn.execute("SELECT COUNT(*) FROM audit_events")
+            return cursor.fetchone()[0]
+
+    def query_audit_events(
+        self,
+        *,
+        session_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        source: Optional[str] = None,
+        user_id: Optional[str] = None,
+        keyword: Optional[str] = None,
+        after: Optional[float] = None,
+        before: Optional[float] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Query audit events with optional filters.
+
+        Returns list of dicts (parsed payload with id/ts overlay).
+        """
+        with self._lock:
+            where_clauses: list = []
+            params: list = []
+
+            if session_id:
+                where_clauses.append("session_id = ?")
+                params.append(session_id)
+            if event_type:
+                where_clauses.append("event_type = ?")
+                params.append(event_type)
+            if tool_name:
+                where_clauses.append("tool = ?")
+                params.append(tool_name)
+            if source:
+                if source == "core":
+                    where_clauses.append(
+                        "(" + " OR ".join([
+                            "event_type LIKE 'session.%'",
+                            "event_type LIKE 'api.%'",
+                            "event_type LIKE 'tool.%'",
+                            "event_type LIKE 'cli.%'",
+                            "event_type LIKE 'context.%'",
+                        ]) + ")"
+                    )
+                else:
+                    where_clauses.append("event_type LIKE ?")
+                    params.append(f"{source}.%")
+            if user_id:
+                where_clauses.append("user_id = ?")
+                params.append(user_id)
+            if keyword:
+                where_clauses.append("payload LIKE ?")
+                params.append(f"%{keyword}%")
+            if after is not None:
+                where_clauses.append("ts >= ?")
+                params.append(after)
+            if before is not None:
+                where_clauses.append("ts <= ?")
+                params.append(before)
+
+            where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+            params.append(limit)
+
+            sql = f"SELECT * FROM audit_events{where_sql} ORDER BY ts DESC LIMIT ?"
+            try:
+                cursor = self._conn.execute(sql, params)
+                rows = cursor.fetchall()
+            except sqlite3.OperationalError:
+                return []
+
+        results = []
+        core_prefixes = ("session.", "api.", "tool.", "cli.", "context.")
+        for row in rows:
+            try:
+                rec = json.loads(row["payload"])
+            except (json.JSONDecodeError, TypeError):
+                rec = {"payload": row["payload"]}
+            rec["id"] = row["id"]
+            rec["ts"] = row["ts"]
+            rec["iso"] = row["iso"]
+            rec["type"] = row["event_type"]
+            rec["session"] = row["session_id"]
+            if "source" not in rec:
+                event_type_val = row["event_type"] or ""
+                if event_type_val.startswith(core_prefixes):
+                    rec["source"] = "core"
+                else:
+                    rec["source"] = event_type_val.split(".", 1)[0] if "." in event_type_val else event_type_val
+            results.append(rec)
+        return results
+
+    def prune_audit_events(self, retention_days: int = 30) -> int:
+        """Delete audit events older than retention_days. Returns count deleted."""
+        if retention_days <= 0:
+            return 0
+        cutoff = time.time() - (retention_days * 86400)
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT COUNT(*) FROM audit_events WHERE ts < ?", (cutoff,)
+            )
+            count = cursor.fetchone()[0]
+            if count > 0:
+                self._conn.execute("DELETE FROM audit_events WHERE ts < ?", (cutoff,))
+                self._conn.commit()
+        return count
