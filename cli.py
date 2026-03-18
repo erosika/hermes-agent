@@ -5872,14 +5872,30 @@ class HermesCLI:
         self.show_banner()
 
         # One-line Honcho session indicator (TTY-only, not captured by agent)
+        # Only show when the user explicitly opted in — not when auto-enabled
+        # from a stray HONCHO_API_KEY env var or shared config.
+        # Explicit opt-in means: `enabled: true` in config OR a hosts.hermes
+        # block exists (evidence of `hermes honcho setup`).
         try:
-            from honcho_integration.client import HonchoClientConfig
-            from agent.display import honcho_session_line, write_tty
-            hcfg = HonchoClientConfig.from_global_config()
-            if hcfg.enabled and hcfg.api_key:
-                sname = hcfg.resolve_session_name(session_id=self.session_id)
-                if sname:
-                    write_tty(honcho_session_line(hcfg.workspace_id, sname) + "\n")
+            from honcho_integration.client import HonchoClientConfig, GLOBAL_CONFIG_PATH
+            import json as _json
+            _hcfg_path = GLOBAL_CONFIG_PATH
+            _explicitly_configured = False
+            if _hcfg_path.exists():
+                _raw = _json.loads(_hcfg_path.read_text(encoding="utf-8"))
+                _host_block = (_raw.get("hosts") or {}).get("hermes", {})
+                _explicitly_configured = (
+                    bool(_host_block)
+                    or _raw.get("enabled") is True
+                    or _host_block.get("enabled") is True
+                )
+            if _explicitly_configured:
+                from agent.display import honcho_session_line, write_tty
+                hcfg = HonchoClientConfig.from_global_config()
+                if hcfg.enabled and hcfg.api_key:
+                    sname = hcfg.resolve_session_name(session_id=self.session_id)
+                    if sname:
+                        write_tty(honcho_session_line(hcfg.workspace_id, sname) + "\n")
         except Exception:
             pass
 
