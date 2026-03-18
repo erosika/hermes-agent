@@ -54,16 +54,16 @@ _SCHEMA = {
 }
 
 
-def _handle_audit_query(**kwargs) -> str:
+def _handle_audit_query(args: dict, **kwargs) -> str:
     """Handle audit_query tool calls."""
     try:
         from agent.audit import query_events, audit_summary, audit_problems
     except ImportError:
         return json.dumps({"error": "Audit module not available"})
 
-    action = kwargs.get("action", "query")
-    session_id = kwargs.get("session")
-    limit = min(kwargs.get("limit") or 20, 100)
+    action = args.get("action", "query")
+    session_id = args.get("session")
+    limit = min(args.get("limit") or 20, 100)
 
     try:
         if action == "summary":
@@ -91,9 +91,9 @@ def _handle_audit_query(**kwargs) -> str:
         else:  # query
             events = query_events(
                 session_id=session_id,
-                event_type=kwargs.get("type"),
-                tool_name=kwargs.get("tool"),
-                keyword=kwargs.get("keyword"),
+                event_type=args.get("type"),
+                tool_name=args.get("tool"),
+                keyword=args.get("keyword"),
                 limit=limit,
             )
             if not events:

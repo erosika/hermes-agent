@@ -41,7 +41,7 @@ class TestAuditQueryTool:
                 log_tool_call(tool_name="terminal", args={"command": "ls"}, result="ok")
                 end_session()
 
-                result = _handle_audit_query(action="query", session="aq-001")
+                result = _handle_audit_query({"action": "query", "session": "aq-001"})
                 assert "terminal" in result
                 assert "tool.call" in result
             finally:
@@ -58,7 +58,7 @@ class TestAuditQueryTool:
                 log_tool_call(tool_name="read_file", args={}, result="ok")
                 end_session()
 
-                result = _handle_audit_query(action="summary", session="aq-002")
+                result = _handle_audit_query({"action": "summary", "session": "aq-002"})
                 assert "Audit summary" in result
                 assert "100" in result
             finally:
@@ -74,7 +74,7 @@ class TestAuditQueryTool:
                 log_tool_call(tool_name="read_file", args={}, result="ok")
                 end_session()
 
-                result = _handle_audit_query(action="problems", session="aq-003")
+                result = _handle_audit_query({"action": "problems", "session": "aq-003"})
                 assert "No problems" in result
             finally:
                 _teardown(old_dir, old_link)
@@ -82,5 +82,5 @@ class TestAuditQueryTool:
     def test_query_empty_returns_no_match(self):
         from tools.audit_tool import _handle_audit_query
         configure(enabled=False)
-        result = _handle_audit_query(action="query", tool="nonexistent")
+        result = _handle_audit_query({"action": "query", "tool": "nonexistent"})
         assert "No matching" in result or "No audit" in result
