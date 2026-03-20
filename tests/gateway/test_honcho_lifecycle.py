@@ -90,6 +90,7 @@ class TestGatewayHonchoLifecycle:
         runner = _make_runner()
         event = _make_event()
         runner._shutdown_gateway_honcho = MagicMock()
+        runner._schedule_gateway_honcho_startup_prewarm = MagicMock()
         runner._async_flush_memories = AsyncMock()
         runner.session_store = MagicMock()
         runner.session_store._generate_session_key.return_value = "gateway-key"
@@ -101,8 +102,43 @@ class TestGatewayHonchoLifecycle:
         result = await runner._handle_reset_command(event)
 
         runner._shutdown_gateway_honcho.assert_called_once_with("gateway-key")
+        runner._schedule_gateway_honcho_startup_prewarm.assert_called_once_with("gateway-key")
         runner._async_flush_memories.assert_called_once_with("old-session", "gateway-key")
         assert "Session reset" in result
+
+    def test_pop_gateway_honcho_startup_snapshot_consumes_cached_peer_snapshot(self):
+        runner = _make_runner()
+        runner._honcho_startup_cache = {
+            "alice": {"representation": "rep", "card": "card"},
+        }
+        hcfg = SimpleNamespace(
+            recall_mode="tools",
+            tools_startup_context=True,
+            peer_name="alice",
+        )
+
+        snapshot = runner._pop_gateway_honcho_startup_snapshot(hcfg)
+
+        assert snapshot == {"alice": {"representation": "rep", "card": "card"}}
+        assert runner._honcho_startup_cache == {}
+
+    def test_pop_gateway_honcho_startup_snapshot_skips_non_tools_mode(self):
+        runner = _make_runner()
+        runner._honcho_startup_cache = {
+            "alice": {"representation": "rep", "card": "card"},
+        }
+        hcfg = SimpleNamespace(
+            recall_mode="hybrid",
+            tools_startup_context=True,
+            peer_name="alice",
+        )
+
+        snapshot = runner._pop_gateway_honcho_startup_snapshot(hcfg)
+
+        assert snapshot is None
+        assert runner._honcho_startup_cache == {
+            "alice": {"representation": "rep", "card": "card"},
+        }
 
     def test_flush_memories_reuses_gateway_session_key_and_skips_honcho_sync(self):
         runner = _make_runner()

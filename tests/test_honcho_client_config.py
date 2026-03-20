@@ -103,3 +103,52 @@ class TestHonchoClientConfigAutoEnable:
 
         assert cfg.api_key == "fallback-key"
         assert cfg.enabled is True  # from_env() sets enabled=True
+
+
+class TestHonchoClientConfigToolsStartupContext:
+    def test_tools_startup_context_uses_root_default_when_host_missing(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps({
+            "toolsStartupContext": True,
+            "hosts": {
+                "hermes": {
+                    "enabled": True,
+                }
+            },
+        }))
+
+        cfg = HonchoClientConfig.from_global_config(config_path=config_path)
+
+        assert cfg.tools_startup_context is True
+
+    def test_tools_startup_context_host_true_overrides_root_false(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps({
+            "toolsStartupContext": False,
+            "hosts": {
+                "hermes": {
+                    "toolsStartupContext": True,
+                    "enabled": True,
+                }
+            },
+        }))
+
+        cfg = HonchoClientConfig.from_global_config(config_path=config_path)
+
+        assert cfg.tools_startup_context is True
+
+    def test_tools_startup_context_host_false_overrides_root_true(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps({
+            "toolsStartupContext": True,
+            "hosts": {
+                "hermes": {
+                    "toolsStartupContext": False,
+                    "enabled": True,
+                }
+            },
+        }))
+
+        cfg = HonchoClientConfig.from_global_config(config_path=config_path)
+
+        assert cfg.tools_startup_context is False
