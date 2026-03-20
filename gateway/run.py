@@ -494,6 +494,32 @@ class GatewayRunner:
         except Exception as exc:
             logger.debug("Gateway Honcho startup prewarm setup failed: %s", exc)
 
+    def _pop_gateway_honcho_startup_snapshot(self, honcho_config) -> dict | None:
+        """Return and clear a cached startup snapshot for the configured Honcho peer.
+
+        Gateway keeps startup snapshots process-wide because each incoming message
+        creates a fresh AIAgent instance. This helper hands the cached snapshot to
+        the next agent exactly once when tools-mode startup context is enabled.
+        """
+        if not honcho_config:
+            return None
+        if getattr(honcho_config, "recall_mode", None) != "tools":
+            return None
+        if not getattr(honcho_config, "tools_startup_context", False):
+            return None
+        peer_id = getattr(honcho_config, "peer_name", None)
+        if not peer_id:
+            return None
+
+        cache = getattr(self, "_honcho_startup_cache", None)
+        if not cache:
+            return None
+
+        snapshot = cache.pop(peer_id, None)
+        if not snapshot:
+            return None
+        return {peer_id: snapshot}
+
     # -- Setup skill availability ----------------------------------------
 
     def _has_setup_skill(self) -> bool:
@@ -4850,6 +4876,7 @@ class GatewayRunner:
 
             pr = self._provider_routing
             honcho_manager, honcho_config = self._get_or_create_gateway_honcho(session_key)
+            startup_snapshot = self._pop_gateway_honcho_startup_snapshot(honcho_config)
             reasoning_config = self._load_reasoning_config()
             self._reasoning_config = reasoning_config
             # Set up streaming consumer if enabled
@@ -4910,6 +4937,8 @@ class GatewayRunner:
                 session_db=self._session_db,
                 fallback_model=self._fallback_model,
             )
+            if startup_snapshot:
+                agent._honcho_startup_snapshot = startup_snapshot
             
             # Store agent reference for interrupt support
             agent_holder[0] = agent

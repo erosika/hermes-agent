@@ -39,6 +39,22 @@ def _write_config(cfg: dict, path: Path | None = None) -> None:
     )
 
 
+def _host_block(cfg: dict) -> dict:
+    return ((cfg.get("hosts") or {}).get(HOST) or {})
+
+
+def _ensure_host_block(cfg: dict) -> dict:
+    return cfg.setdefault("hosts", {}).setdefault(HOST, {})
+
+
+def _effective_value(cfg: dict, key: str, default=None):
+    """Resolve host-scoped config with root fallback, preserving explicit False."""
+    host_val = _host_block(cfg).get(key)
+    if host_val is not None:
+        return host_val
+    return cfg.get(key, default)
+
+
 def _resolve_api_key(cfg: dict) -> str:
     """Resolve API key with host -> root -> env fallback."""
     host_key = ((cfg.get("hosts") or {}).get(HOST) or {}).get("apiKey")
@@ -59,6 +75,19 @@ def _prompt(label: str, default: str | None = None, secret: bool = False) -> str
     else:
         val = sys.stdin.readline().strip()
     return val or (default or "")
+
+
+def _parse_bool(value: str, default: bool = False) -> bool:
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return default
+    if normalized in {"y", "yes", "true", "1", "on"}:
+        return True
+    if normalized in {"n", "no", "false", "0", "off"}:
+        return False
+    return default
 
 
 def _ensure_sdk_installed() -> bool:
@@ -109,8 +138,7 @@ def cmd_setup(args) -> None:
 
     # All writes go to hosts.hermes — root keys are managed by the user
     # or the honcho CLI only.
-    hosts = cfg.setdefault("hosts", {})
-    hermes_host = hosts.setdefault(HOST, {})
+    hermes_host = _ensure_host_block(cfg)
 
     # API key — shared credential, lives at root so all hosts can read it
     current_key = cfg.get("apiKey", "")
@@ -127,12 +155,12 @@ def cmd_setup(args) -> None:
         return
 
     # Peer name
-    current_peer = hermes_host.get("peerName") or cfg.get("peerName", "")
+    current_peer = _effective_value(cfg, "peerName", "")
     new_peer = _prompt("Your name (user peer)", default=current_peer or os.getenv("USER", "user"))
     if new_peer:
         hermes_host["peerName"] = new_peer
 
-    current_workspace = hermes_host.get("workspace") or cfg.get("workspace", "hermes")
+    current_workspace = _effective_value(cfg, "workspace", "hermes")
     new_workspace = _prompt("Workspace ID", default=current_workspace)
     if new_workspace:
         hermes_host["workspace"] = new_workspace
@@ -140,7 +168,7 @@ def cmd_setup(args) -> None:
     hermes_host.setdefault("aiPeer", HOST)
 
     # Memory mode
-    current_mode = hermes_host.get("memoryMode") or cfg.get("memoryMode", "hybrid")
+    current_mode = _effective_value(cfg, "memoryMode", "hybrid")
     print(f"\n  Memory mode options:")
     print("    hybrid  — write to both Honcho and local MEMORY.md (default)")
     print("    honcho  — Honcho only, skip MEMORY.md writes")
@@ -151,7 +179,7 @@ def cmd_setup(args) -> None:
         hermes_host["memoryMode"] = "hybrid"
 
     # Write frequency
-    current_wf = str(hermes_host.get("writeFrequency") or cfg.get("writeFrequency", "async"))
+    current_wf = str(_effective_value(cfg, "writeFrequency", "async"))
     print(f"\n  Write frequency options:")
     print("    async   — background thread, no token cost (recommended)")
     print("    turn    — sync write after every turn")
@@ -164,7 +192,7 @@ def cmd_setup(args) -> None:
         hermes_host["writeFrequency"] = new_wf if new_wf in ("async", "turn", "session") else "async"
 
     # Recall mode
-    _raw_recall = hermes_host.get("recallMode") or cfg.get("recallMode", "hybrid")
+    _raw_recall = _effective_value(cfg, "recallMode", "hybrid")
     current_recall = "hybrid" if _raw_recall not in ("hybrid", "context", "tools") else _raw_recall
     print(f"\n  Recall mode options:")
     print("    hybrid  — auto-injected context + Honcho tools available (default)")
@@ -174,8 +202,22 @@ def cmd_setup(args) -> None:
     if new_recall in ("hybrid", "context", "tools"):
         hermes_host["recallMode"] = new_recall
 
+    current_startup_ctx = bool(_effective_value(cfg, "toolsStartupContext", False))
+    startup_default = "y" if current_startup_ctx else "n"
+    print(f"\n  Tools startup context:")
+    print("    y — in recallMode=tools, inject lightweight startup memory on first turn")
+    print("    n — keep tools mode cold-start behavior")
+    startup_answer = _prompt(
+        "Enable lightweight startup context in tools mode? (y/n)",
+        default=startup_default,
+    )
+    hermes_host["toolsStartupContext"] = _parse_bool(
+        startup_answer,
+        default=current_startup_ctx,
+    )
+
     # Session strategy
-    current_strat = hermes_host.get("sessionStrategy") or cfg.get("sessionStrategy", "per-directory")
+    current_strat = _effective_value(cfg, "sessionStrategy", "per-directory")
     print(f"\n  Session strategy options:")
     print("    per-directory — one session per working directory (default)")
     print("    per-session   — new Honcho session each run, named by Hermes session ID")
@@ -213,6 +255,8 @@ def cmd_setup(args) -> None:
         _mode_str = f"{hcfg.memory_mode}  (peers: {overrides})"
     print(f"  Mode:      {_mode_str}")
     print(f"  Frequency: {hcfg.write_frequency}")
+    print(f"  Recall:    {hcfg.recall_mode}")
+    print(f"  Startup:   {getattr(hcfg, 'tools_startup_context', False)}")
     print(f"\n  Honcho tools available in chat:")
     print(f"    honcho_context  — ask Honcho a question about you (LLM-synthesized)")
     print(f"    honcho_search       — semantic search over your history (no LLM)")
@@ -263,6 +307,7 @@ def cmd_status(args) -> None:
     print(f"  User peer:      {hcfg.peer_name or 'not set'}")
     print(f"  Session key:    {hcfg.resolve_session_name()}")
     print(f"  Recall mode:    {hcfg.recall_mode}")
+    print(f"  Startup ctx:    {hcfg.tools_startup_context}")
     print(f"  Memory mode:    {hcfg.memory_mode}")
     if hcfg.peer_memory_modes:
         print(f"  Per-peer modes:")
@@ -339,12 +384,10 @@ def cmd_peer(args) -> None:
 
     if user_name is None and ai_name is None and reasoning is None:
         # Show current values
-        hosts = cfg.get("hosts", {})
-        hermes = hosts.get(HOST, {})
-        user = hermes.get('peerName') or cfg.get('peerName') or '(not set)'
-        ai = hermes.get('aiPeer') or cfg.get('aiPeer') or HOST
-        lvl = hermes.get("dialecticReasoningLevel") or cfg.get("dialecticReasoningLevel") or "low"
-        max_chars = hermes.get("dialecticMaxChars") or cfg.get("dialecticMaxChars") or 600
+        user = _effective_value(cfg, 'peerName', '(not set)') or '(not set)'
+        ai = _effective_value(cfg, 'aiPeer', HOST)
+        lvl = _effective_value(cfg, "dialecticReasoningLevel", "low")
+        max_chars = _effective_value(cfg, "dialecticMaxChars", 600)
         print(f"\nHoncho peers\n" + "─" * 40)
         print(f"  User peer:   {user}")
         print(f"    Your identity in Honcho. Messages you send build this peer's card.")
@@ -389,11 +432,7 @@ def cmd_mode(args) -> None:
     mode_arg = getattr(args, "mode", None)
 
     if mode_arg is None:
-        current = (
-            (cfg.get("hosts") or {}).get(HOST, {}).get("memoryMode")
-            or cfg.get("memoryMode")
-            or "hybrid"
-        )
+        current = _effective_value(cfg, "memoryMode", "hybrid")
         print(f"\nHoncho memory mode\n" + "─" * 40)
         for m, desc in MODES.items():
             marker = " ←" if m == current else ""
@@ -413,16 +452,14 @@ def cmd_mode(args) -> None:
 def cmd_tokens(args) -> None:
     """Show or set token budget settings."""
     cfg = _read_config()
-    hosts = cfg.get("hosts", {})
-    hermes = hosts.get(HOST, {})
 
     context = getattr(args, "context", None)
     dialectic = getattr(args, "dialectic", None)
 
     if context is None and dialectic is None:
-        ctx_tokens = hermes.get("contextTokens") or cfg.get("contextTokens") or "(Honcho default)"
-        d_chars = hermes.get("dialecticMaxChars") or cfg.get("dialecticMaxChars") or 600
-        d_level = hermes.get("dialecticReasoningLevel") or cfg.get("dialecticReasoningLevel") or "low"
+        ctx_tokens = _effective_value(cfg, "contextTokens", "(Honcho default)")
+        d_chars = _effective_value(cfg, "dialecticMaxChars", 600)
+        d_level = _effective_value(cfg, "dialecticReasoningLevel", "low")
         print(f"\nHoncho budgets\n" + "─" * 40)
         print()
         print(f"  Context     {ctx_tokens} tokens")
