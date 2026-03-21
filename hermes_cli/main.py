@@ -14,8 +14,8 @@ Usage:
     hermes setup               # Interactive setup wizard
     hermes logout              # Clear stored authentication
     hermes status              # Show status of all components
+    hermes tail                # Tail recent session messages from state.db
     hermes cron                # Manage cron jobs
-    hermes cron list           # List cron jobs
     hermes cron status         # Check if cron scheduler is running
     hermes doctor              # Check configuration and dependencies
     hermes honcho setup                    # Configure Honcho AI memory integration
@@ -2316,6 +2316,12 @@ def cmd_status(args):
     show_status(args)
 
 
+def cmd_tail(args):
+    """Tail recent session messages from the existing SessionDB."""
+    from hermes_cli.tail import tail_command
+    tail_command(args)
+
+
 def cmd_cron(args):
     """Cron job management."""
     from hermes_cli.cron import cron_command
@@ -2940,7 +2946,7 @@ def _coalesce_session_name_args(argv: list) -> list:
     """
     _SUBCOMMANDS = {
         "chat", "model", "gateway", "setup", "whatsapp", "login", "logout",
-        "status", "cron", "doctor", "config", "pairing", "skills", "tools",
+        "status", "tail", "cron", "doctor", "config", "pairing", "skills", "tools",
         "sessions", "insights", "version", "update", "uninstall",
     }
     _SESSION_FLAGS = {"-c", "--continue", "-r", "--resume"}
@@ -3312,6 +3318,43 @@ For more help on a command:
         help="Run deep checks (may take longer)"
     )
     status_parser.set_defaults(func=cmd_status)
+
+    # =========================================================================
+    # tail command
+    # =========================================================================
+    tail_parser = subparsers.add_parser(
+        "tail",
+        help="Tail recent session messages from state.db",
+        description="Live-watch a session using the existing sessions/messages store (issue #1155)",
+    )
+    tail_parser.add_argument(
+        "session",
+        nargs="?",
+        help="Session ID/prefix or title to tail (default: latest session for the selected source)",
+    )
+    tail_parser.add_argument(
+        "--source",
+        default="cli",
+        help="Session source to use when no session is specified (default: cli, use 'all' for latest across every source)",
+    )
+    tail_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Max messages to fetch per poll (default: 20)",
+    )
+    tail_parser.add_argument(
+        "--follow",
+        action="store_true",
+        help="Continue polling for new messages until interrupted",
+    )
+    tail_parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=1.0,
+        help="Polling interval in seconds when following (default: 1.0)",
+    )
+    tail_parser.set_defaults(func=cmd_tail)
     
     # =========================================================================
     # cron command

@@ -634,14 +634,8 @@ class SessionDB:
             self._conn.commit()
         return msg_id
 
-    def get_messages(self, session_id: str) -> List[Dict[str, Any]]:
-        """Load all messages for a session, ordered by timestamp."""
-        with self._lock:
-            cursor = self._conn.execute(
-                "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp, id",
-                (session_id,),
-            )
-            rows = cursor.fetchall()
+    def _decode_message_rows(self, rows) -> List[Dict[str, Any]]:
+        """Decode SQLite rows from the messages table into plain dicts."""
         result = []
         for row in rows:
             msg = dict(row)
@@ -652,6 +646,47 @@ class SessionDB:
                     pass
             result.append(msg)
         return result
+
+    def get_messages(self, session_id: str) -> List[Dict[str, Any]]:
+        """Load all messages for a session, ordered by timestamp."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp, id",
+                (session_id,),
+            )
+            rows = cursor.fetchall()
+        return self._decode_message_rows(rows)
+
+    def get_messages_since(
+        self,
+        session_id: str,
+        after_id: int = 0,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Load messages for a session with row IDs greater than after_id."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """SELECT * FROM messages
+                   WHERE session_id = ? AND id > ?
+                   ORDER BY id
+                   LIMIT ?""",
+                (session_id, after_id, limit),
+            )
+            rows = cursor.fetchall()
+        return self._decode_message_rows(rows)
+
+    def get_recent_messages(self, session_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Load the most recent messages for a session in chronological order."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """SELECT * FROM messages
+                   WHERE session_id = ?
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (session_id, limit),
+            )
+            rows = cursor.fetchall()
+        return self._decode_message_rows(reversed(rows))
 
     def get_messages_as_conversation(self, session_id: str) -> List[Dict[str, Any]]:
         """
