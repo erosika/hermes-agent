@@ -214,7 +214,7 @@ class TestFromGlobalConfig:
         assert config.base_url == "http://localhost:8000"
         assert config.enabled is True
 
-    def test_base_url_from_config_root(self, tmp_path):
+    def test_base_url_from_config_root_camel_case(self, tmp_path):
         """baseUrl in config root is read and takes precedence over env var."""
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps({"baseUrl": "http://config-host:9000"}))
@@ -223,16 +223,74 @@ class TestFromGlobalConfig:
             config = HonchoClientConfig.from_global_config(config_path=config_file)
         assert config.base_url == "http://config-host:9000"
 
-    def test_base_url_not_read_from_host_block(self, tmp_path):
-        """baseUrl is a root-level connection setting, not overridable per-host (consistent with apiKey)."""
+    def test_base_url_from_config_root_snake_case(self, tmp_path):
+        """base_url in config root is also accepted for local/self-hosted instances."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"base_url": "http://config-host:9001"}))
+
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.base_url == "http://config-host:9001"
+
+    def test_base_url_from_config_root_upper_url_alias(self, tmp_path):
+        """baseURL is accepted as a compatibility alias when reading config."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"baseURL": "http://config-host:9002"}))
+
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.base_url == "http://config-host:9002"
+
+    def test_base_url_host_block_overrides_root(self, tmp_path):
+        """Host-level base_url/baseUrl should override root-level values."""
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps({
             "baseUrl": "http://root:9000",
-            "hosts": {"hermes": {"baseUrl": "http://host-block:9001"}},
+            "hosts": {"hermes": {"base_url": "http://host-block:9001"}},
         }))
 
         config = HonchoClientConfig.from_global_config(config_path=config_file)
-        assert config.base_url == "http://root:9000"
+        assert config.base_url == "http://host-block:9001"
+
+    def test_base_url_host_block_accepts_camel_case_aliases(self, tmp_path):
+        """Host-level baseUrl/baseURL aliases are accepted too."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "hosts": {"hermes": {"baseURL": "http://host-block:9002"}},
+        }))
+
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.base_url == "http://host-block:9002"
+
+    def test_base_url_host_block_wins_over_env(self, tmp_path):
+        """Host-level config should beat HONCHO_BASE_URL env fallback."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "hosts": {"hermes": {"baseUrl": "http://host-block:9003"}},
+        }))
+
+        with patch.dict(os.environ, {"HONCHO_BASE_URL": "http://localhost:8000"}, clear=False):
+            config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.base_url == "http://host-block:9003"
+
+    def test_root_base_url_wins_over_env_when_host_missing(self, tmp_path):
+        """Root config should still beat env fallback when no host override exists."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"base_url": "http://root:9004"}))
+
+        with patch.dict(os.environ, {"HONCHO_BASE_URL": "http://localhost:8000"}, clear=False):
+            config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.base_url == "http://root:9004"
+
+    def test_base_url_only_config_auto_enables_when_host_scoped(self, tmp_path):
+        """Host-scoped base_url alone should auto-enable local/self-hosted Honcho."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "hosts": {"hermes": {"base_url": "http://host-block:9005"}},
+        }))
+
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.api_key is None
+        assert config.base_url == "http://host-block:9005"
+        assert config.enabled is True
 
 
 class TestResolveSessionName:
