@@ -25,17 +25,18 @@ Hermes has two memory systems that can work together or be configured separately
 Set `memoryMode` to `honcho` to use Honcho exclusively. See [Memory Modes](#memory-modes) for per-peer configuration.
 
 
-## Self-hosted / Docker
+## Quick Start
 
-Hermes supports a local Honcho instance (e.g. via Docker) in addition to the hosted API. Point it at your instance using `HONCHO_BASE_URL` — no API key required.
+Hermes supports both hosted Honcho and local/self-hosted Honcho.
 
-**Via `hermes config`:**
+| Mode | What Hermes needs | Preferred config |
+|------|-------------------|------------------|
+| Hosted Honcho | `apiKey` | `~/.honcho/config.json` root `apiKey` |
+| Local/self-hosted Honcho | `base_url` | `~/.honcho/config.json` root or `hosts.hermes.base_url` |
 
-```bash
-hermes config set HONCHO_BASE_URL http://localhost:8000
-```
+For local/self-hosted Honcho, `base_url` is enough — no API key required.
 
-**Via `~/.honcho/config.json`:**
+Minimal local example:
 
 ```json
 {
@@ -48,9 +49,22 @@ hermes config set HONCHO_BASE_URL http://localhost:8000
 }
 ```
 
-Hermes auto-enables Honcho when either `apiKey` or `base_url` is present, so no further configuration is needed for a local instance.
+Minimal hosted example:
 
-To run Honcho locally, refer to the [Honcho self-hosting docs](https://docs.honcho.dev).
+```json
+{
+  "apiKey": "***",
+  "hosts": {
+    "hermes": {
+      "enabled": true
+    }
+  }
+}
+```
+
+Hermes auto-enables Honcho when either `apiKey` or `base_url` is present.
+
+For local/self-hosted deployment details, see the [Honcho self-hosting docs](https://docs.honcho.dev).
 
 ## Setup
 
@@ -60,7 +74,7 @@ To run Honcho locally, refer to the [Honcho self-hosting docs](https://docs.honc
 hermes honcho setup
 ```
 
-The setup wizard walks through API key, peer names, workspace, memory mode, write frequency, recall mode, and session strategy. It offers to install `honcho-ai` if missing.
+The setup wizard walks through hosted vs. local/self-hosted connection settings, peer names, workspace, memory mode, write frequency, recall mode, and session strategy. It offers to install `honcho-ai` if missing.
 
 ### Manual Setup
 
@@ -70,17 +84,21 @@ The setup wizard walks through API key, peer names, workspace, memory mode, writ
 pip install 'honcho-ai>=2.0.1'
 ```
 
-#### 2. Get an API Key
+#### 2. Choose Hosted or Local/Self-Hosted Honcho
 
-Go to [app.honcho.dev](https://app.honcho.dev) > Settings > API Keys.
+For hosted Honcho, get an API key from [app.honcho.dev](https://app.honcho.dev) > Settings > API Keys.
+
+For local/self-hosted Honcho, configure a base URL instead of an API key.
 
 #### 3. Configure
 
-Honcho reads from `~/.honcho/config.json` (shared across all Honcho-enabled applications):
+Honcho reads from `~/.honcho/config.json` (shared across all Honcho-enabled applications).
+
+Hosted example:
 
 ```json
 {
-  "apiKey": "your-honcho-api-key",
+  "apiKey": "your-h...-key",
   "hosts": {
     "hermes": {
       "workspace": "hermes",
@@ -96,16 +114,39 @@ Honcho reads from `~/.honcho/config.json` (shared across all Honcho-enabled appl
 }
 ```
 
-`apiKey` lives at the root because it is a shared credential across all Honcho-enabled tools. All other settings are scoped under `hosts.hermes`. The `hermes honcho setup` wizard writes this structure automatically.
+Local/self-hosted example:
 
-Or set the API key as an environment variable:
-
-```bash
-hermes config set HONCHO_API_KEY your-key
+```json
+{
+  "hosts": {
+    "hermes": {
+      "base_url": "http://localhost:8000",
+      "workspace": "hermes",
+      "peerName": "your-name",
+      "aiPeer": "hermes",
+      "memoryMode": "honcho",
+      "writeFrequency": "async",
+      "recallMode": "hybrid",
+      "sessionStrategy": "per-directory",
+      "enabled": true
+    }
+  }
+}
 ```
 
+`apiKey` lives at the root because it is a shared credential across all Honcho-enabled tools. `base_url` can be configured at the root or under `hosts.hermes`; host-level values win. For compatibility, Hermes also accepts `baseUrl` and `baseURL` when reading config, but `base_url` is the preferred spelling in docs and examples.
+
+You can also use environment variables:
+
+```bash
+export HONCHO_API_KEY=your-key
+export HONCHO_BASE_URL=http://localhost:8000
+```
+
+Only one of these is required. Use `HONCHO_API_KEY` for hosted Honcho or `HONCHO_BASE_URL` for local/self-hosted Honcho.
+
 :::info
-When an API key is present (either in `~/.honcho/config.json` or as `HONCHO_API_KEY`), Honcho auto-enables unless explicitly set to `"enabled": false`.
+When an API key or base URL is present (either in `~/.honcho/config.json` or via environment variables), Honcho auto-enables unless explicitly set to `"enabled": false`.
 :::
 
 ## Configuration
@@ -118,18 +159,20 @@ Settings are scoped to `hosts.hermes` and fall back to root-level globals when t
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `apiKey` | — | Honcho API key (required, shared across all hosts) |
+| `apiKey` | — | Honcho API key for hosted Honcho (shared across all hosts) |
+| `base_url` | — | Base URL for local/self-hosted Honcho. Also accepts `baseUrl` and `baseURL` when reading config. |
 | `sessions` | `{}` | Manual session name overrides per directory (shared) |
 
 **Host-level (`hosts.hermes`)**
 
 | Field | Default | Description |
 |-------|---------|-------------|
+| `base_url` | — | Host-specific base URL override for local/self-hosted Honcho. Also accepts `baseUrl` and `baseURL` when reading config. |
 | `workspace` | `"hermes"` | Workspace identifier |
 | `peerName` | *(derived)* | Your identity name for user modeling |
 | `aiPeer` | `"hermes"` | AI assistant identity name |
 | `environment` | `"production"` | Honcho environment |
-| `enabled` | *(auto)* | Auto-enables when API key is present |
+| `enabled` | *(auto)* | Auto-enables when API key or base URL is present |
 | `saveMessages` | `true` | Whether to sync messages to Honcho |
 | `memoryMode` | `"hybrid"` | Memory mode: `hybrid` or `honcho` |
 | `writeFrequency` | `"async"` | When to write: `async`, `turn`, `session`, or integer N |
@@ -142,6 +185,26 @@ Settings are scoped to `hosts.hermes` and fall back to root-level globals when t
 | `linkedHosts` | `[]` | Other host keys whose workspaces to cross-reference |
 
 All host-level fields fall back to the equivalent root-level key if not set under `hosts.hermes`. Existing configs with settings at root level continue to work.
+
+### Connection Setting Resolution
+
+Hermes resolves connection settings in a predictable order.
+
+`apiKey` resolution:
+1. `hosts.hermes.apiKey`
+2. root `apiKey`
+3. `HONCHO_API_KEY`
+
+`base_url` resolution:
+1. `hosts.hermes.base_url`
+2. `hosts.hermes.baseUrl`
+3. `hosts.hermes.baseURL`
+4. root `base_url`
+5. root `baseUrl`
+6. root `baseURL`
+7. `HONCHO_BASE_URL`
+
+For docs and examples, prefer `base_url`. `baseUrl` and `baseURL` are compatibility aliases accepted when reading existing config.
 
 ### Memory Modes
 
@@ -161,7 +224,7 @@ Memory mode can be set globally or per-peer (user, agent1, agent2, etc):
 }
 ```
 
-To disable Honcho entirely, set `enabled: false` or remove the API key.
+To disable Honcho entirely, set `enabled: false` or remove the API key / base URL.
 
 ### Recall Modes
 
@@ -222,11 +285,13 @@ Resolution: `hosts.<tool>` field > root-level field > default. In this example, 
 
 ### Hermes Config (`~/.hermes/config.yaml`)
 
-Intentionally minimal — most configuration comes from `~/.honcho/config.json`:
+Intentionally minimal — most Honcho configuration should live in `~/.honcho/config.json`:
 
 ```yaml
 honcho: {}
 ```
+
+Use `~/.hermes/config.yaml` only for Hermes-specific overrides. For normal hosted or local/self-hosted setup, prefer `~/.honcho/config.json` so the configuration stays shared across Honcho-enabled tools.
 
 ## How It Works
 
@@ -292,6 +357,46 @@ This means:
 | `/resume` | Current session is flushed, then the resumed session's Honcho context loads |
 | Session expiry | Automatic flush + shutdown after the configured idle timeout |
 | Gateway stop | All active Honcho managers are flushed and shut down gracefully |
+
+## Troubleshooting
+
+### Local/self-hosted instance is configured but Hermes still says no API key
+
+Make sure you configured `base_url` rather than only expecting an API key-based flow. For local/self-hosted Honcho, `base_url` is enough.
+
+Check with:
+
+```bash
+hermes honcho status
+```
+
+A healthy local setup usually looks like:
+
+```text
+Enabled:        True
+API key:        not set
+Base URL:       http://localhost:8000
+Connection...   OK
+```
+
+### Config exists but Hermes is not picking it up
+
+Check these first:
+
+- `~/.honcho/config.json` is valid JSON
+- there are no trailing commas in the JSON file
+- `base_url` is spelled correctly in the example you copied
+- if you used an alias like `baseUrl` or `baseURL`, remember `base_url` is the canonical documented spelling
+- `enabled` is not explicitly set to `false`
+
+### Local/self-hosted Honcho is unreachable
+
+If `hermes honcho status` shows a base URL but connection still fails, verify that your Honcho instance is actually reachable at that URL and that Docker or your local server is running.
+
+### Need more help?
+
+- [Honcho self-hosting docs](https://docs.honcho.dev)
+- [Honcho Discord](https://discord.gg/honcho)
 
 ## Tools
 
