@@ -39,8 +39,16 @@ def load_hermes_dotenv(
         _load_dotenv_with_fallback(user_env, override=True)
         loaded.append(user_env)
 
+    protected_keys = ("HERMES_BASE_HOME", "HERMES_HOME", "HERMES_INSTANCE", "HERMES_HONCHO_HOST")
+    protected_values = {key: os.environ.get(key) for key in protected_keys}
+
     if project_env_path and project_env_path.exists():
         _load_dotenv_with_fallback(project_env_path, override=not loaded)
+        for key, value in protected_values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
         loaded.append(project_env_path)
 
     return loaded

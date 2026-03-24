@@ -85,6 +85,46 @@ class TestGeneratedSystemdUnits:
         assert "ExecStop=" not in unit
         assert "TimeoutStopSec=60" in unit
 
+    def test_user_unit_exports_instance_environment(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HERMES_INSTANCE", "dreamer")
+        monkeypatch.setenv("HERMES_BASE_HOME", str(tmp_path / ".hermes"))
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes" / "instances" / "dreamer"))
+        monkeypatch.setenv("HERMES_HONCHO_HOST", "hermes.dreamer")
+
+        unit = gateway_cli.generate_systemd_unit(system=False)
+
+        assert 'Environment="HERMES_INSTANCE=dreamer"' in unit
+        assert f'Environment="HERMES_BASE_HOME={tmp_path / ".hermes"}"' in unit
+        assert f'Environment="HERMES_HOME={tmp_path / ".hermes" / "instances" / "dreamer"}"' in unit
+        assert 'Environment="HERMES_HONCHO_HOST=hermes.dreamer"' in unit
+
+    def test_service_name_uses_named_instance_slug(self, monkeypatch):
+        monkeypatch.setenv("HERMES_INSTANCE", "dreamer")
+        assert gateway_cli.get_service_name() == "hermes-gateway-dreamer"
+
+    def test_launchd_plist_path_scopes_named_instances(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(gateway_cli.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HERMES_INSTANCE", "dreamer")
+
+        assert gateway_cli.get_launchd_plist_path() == tmp_path / "Library" / "LaunchAgents" / "ai.hermes.gateway.dreamer.plist"
+
+    def test_launchd_plist_uses_scoped_label_and_exports_instance_environment(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(gateway_cli.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HERMES_INSTANCE", "dreamer")
+        monkeypatch.setenv("HERMES_BASE_HOME", str(tmp_path / ".hermes"))
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes" / "instances" / "dreamer"))
+        monkeypatch.setenv("HERMES_HONCHO_HOST", "hermes.dreamer")
+
+        plist = gateway_cli.generate_launchd_plist()
+
+        assert "<string>ai.hermes.gateway.dreamer</string>" in plist
+        assert "<key>EnvironmentVariables</key>" in plist
+        assert f"<string>{tmp_path / '.hermes' / 'instances' / 'dreamer'}</string>" in plist
+        assert "<key>HERMES_INSTANCE</key>" in plist
+        assert "<string>dreamer</string>" in plist
+        assert "<key>HERMES_HONCHO_HOST</key>" in plist
+        assert "<string>hermes.dreamer</string>" in plist
+
     def test_user_unit_includes_resolved_node_directory_in_path(self, monkeypatch):
         monkeypatch.setattr(gateway_cli.shutil, "which", lambda cmd: "/home/test/.nvm/versions/node/v24.14.0/bin/node" if cmd == "node" else None)
 

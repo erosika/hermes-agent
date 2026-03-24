@@ -17,6 +17,12 @@ from honcho_integration.client import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clear_instance_host_env(monkeypatch):
+    monkeypatch.delenv("HERMES_INSTANCE", raising=False)
+    monkeypatch.delenv("HERMES_HONCHO_HOST", raising=False)
+
+
 class TestHonchoClientConfigDefaults:
     def test_default_values(self):
         config = HonchoClientConfig()
@@ -144,7 +150,7 @@ class TestFromGlobalConfig:
     def test_root_fields_used_when_no_host_block(self, tmp_path):
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps({
-            "apiKey": "key",
+            "apiKey": "***",
             "workspace": "root-ws",
             "aiPeer": "root-ai",
         }))
@@ -152,6 +158,45 @@ class TestFromGlobalConfig:
         config = HonchoClientConfig.from_global_config(config_path=config_file)
         assert config.workspace_id == "root-ws"
         assert config.ai_peer == "root-ai"
+
+    def test_uses_instance_scoped_host_by_default(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "apiKey": "***",
+            "workspace": "root-ws",
+            "aiPeer": "root-ai",
+            "hosts": {
+                "hermes.dreamer": {
+                    "workspace": "dreamer-ws",
+                    "aiPeer": "dreamer-ai",
+                }
+            }
+        }))
+
+        monkeypatch.setenv("HERMES_INSTANCE", "dreamer")
+        monkeypatch.delenv("HERMES_HONCHO_HOST", raising=False)
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+
+        assert config.host == "hermes.dreamer"
+        assert config.workspace_id == "dreamer-ws"
+        assert config.ai_peer == "dreamer-ai"
+
+    def test_explicit_host_override_still_wins(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "apiKey": "***",
+            "hosts": {
+                "hermes": {"workspace": "main-ws"},
+                "hermes.dreamer": {"workspace": "dreamer-ws"},
+            }
+        }))
+
+        monkeypatch.setenv("HERMES_INSTANCE", "dreamer")
+        monkeypatch.delenv("HERMES_HONCHO_HOST", raising=False)
+        config = HonchoClientConfig.from_global_config(host="hermes", config_path=config_file)
+
+        assert config.host == "hermes"
+        assert config.workspace_id == "main-ws"
 
     def test_session_strategy_default_from_global_config(self, tmp_path):
         """from_global_config with no sessionStrategy should match dataclass default."""

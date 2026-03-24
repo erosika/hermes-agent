@@ -10,9 +10,11 @@ import os
 import sys
 from pathlib import Path
 
-from honcho_integration.client import resolve_config_path, GLOBAL_CONFIG_PATH
+from honcho_integration.client import resolve_active_host, resolve_config_path, GLOBAL_CONFIG_PATH
 
-HOST = "hermes"
+
+def _host_key() -> str:
+    return resolve_active_host()
 
 
 def _config_path() -> Path:
@@ -41,7 +43,7 @@ def _write_config(cfg: dict, path: Path | None = None) -> None:
 
 def _resolve_api_key(cfg: dict) -> str:
     """Resolve API key with host -> root -> env fallback."""
-    host_key = ((cfg.get("hosts") or {}).get(HOST) or {}).get("apiKey")
+    host_key = ((cfg.get("hosts") or {}).get(_host_key()) or {}).get("apiKey")
     return host_key or cfg.get("apiKey", "") or os.environ.get("HONCHO_API_KEY", "")
 
 
@@ -107,10 +109,11 @@ def cmd_setup(args) -> None:
     if not _ensure_sdk_installed():
         return
 
-    # All writes go to hosts.hermes — root keys are managed by the user
-    # or the honcho CLI only.
+    host_key = _host_key()
+    # All writes go to the active Hermes host block — root keys are managed by
+    # the user or the honcho CLI only.
     hosts = cfg.setdefault("hosts", {})
-    hermes_host = hosts.setdefault(HOST, {})
+    hermes_host = hosts.setdefault(host_key, {})
 
     # API key — shared credential, lives at root so all hosts can read it
     current_key = cfg.get("apiKey", "")
@@ -137,7 +140,7 @@ def cmd_setup(args) -> None:
     if new_workspace:
         hermes_host["workspace"] = new_workspace
 
-    hermes_host.setdefault("aiPeer", HOST)
+    hermes_host.setdefault("aiPeer", host_key)
 
     # Memory mode
     current_mode = hermes_host.get("memoryMode") or cfg.get("memoryMode", "hybrid")
@@ -339,10 +342,11 @@ def cmd_peer(args) -> None:
 
     if user_name is None and ai_name is None and reasoning is None:
         # Show current values
+        host_key = _host_key()
         hosts = cfg.get("hosts", {})
-        hermes = hosts.get(HOST, {})
+        hermes = hosts.get(host_key, {})
         user = hermes.get('peerName') or cfg.get('peerName') or '(not set)'
-        ai = hermes.get('aiPeer') or cfg.get('aiPeer') or HOST
+        ai = hermes.get('aiPeer') or cfg.get('aiPeer') or host_key
         lvl = hermes.get("dialecticReasoningLevel") or cfg.get("dialecticReasoningLevel") or "low"
         max_chars = hermes.get("dialecticMaxChars") or cfg.get("dialecticMaxChars") or 600
         print(f"\nHoncho peers\n" + "─" * 40)
@@ -356,13 +360,15 @@ def cmd_peer(args) -> None:
         print(f"  Dialectic cap:        {max_chars} chars\n")
         return
 
+    host_key = _host_key()
+
     if user_name is not None:
-        cfg.setdefault("hosts", {}).setdefault(HOST, {})["peerName"] = user_name.strip()
+        cfg.setdefault("hosts", {}).setdefault(host_key, {})["peerName"] = user_name.strip()
         changed = True
         print(f"  User peer → {user_name.strip()}")
 
     if ai_name is not None:
-        cfg.setdefault("hosts", {}).setdefault(HOST, {})["aiPeer"] = ai_name.strip()
+        cfg.setdefault("hosts", {}).setdefault(host_key, {})["aiPeer"] = ai_name.strip()
         changed = True
         print(f"  AI peer   → {ai_name.strip()}")
 
@@ -370,7 +376,7 @@ def cmd_peer(args) -> None:
         if reasoning not in REASONING_LEVELS:
             print(f"  Invalid reasoning level '{reasoning}'. Options: {', '.join(REASONING_LEVELS)}")
             return
-        cfg.setdefault("hosts", {}).setdefault(HOST, {})["dialecticReasoningLevel"] = reasoning
+        cfg.setdefault("hosts", {}).setdefault(host_key, {})["dialecticReasoningLevel"] = reasoning
         changed = True
         print(f"  Dialectic reasoning level → {reasoning}")
 
@@ -388,9 +394,11 @@ def cmd_mode(args) -> None:
     cfg = _read_config()
     mode_arg = getattr(args, "mode", None)
 
+    host_key = _host_key()
+
     if mode_arg is None:
         current = (
-            (cfg.get("hosts") or {}).get(HOST, {}).get("memoryMode")
+            (cfg.get("hosts") or {}).get(host_key, {}).get("memoryMode")
             or cfg.get("memoryMode")
             or "hybrid"
         )
@@ -405,7 +413,7 @@ def cmd_mode(args) -> None:
         print(f"  Invalid mode '{mode_arg}'. Options: {', '.join(MODES)}\n")
         return
 
-    cfg.setdefault("hosts", {}).setdefault(HOST, {})["memoryMode"] = mode_arg
+    cfg.setdefault("hosts", {}).setdefault(host_key, {})["memoryMode"] = mode_arg
     _write_config(cfg)
     print(f"  Memory mode → {mode_arg}  ({MODES[mode_arg]})\n")
 
@@ -413,8 +421,9 @@ def cmd_mode(args) -> None:
 def cmd_tokens(args) -> None:
     """Show or set token budget settings."""
     cfg = _read_config()
+    host_key = _host_key()
     hosts = cfg.get("hosts", {})
-    hermes = hosts.get(HOST, {})
+    hermes = hosts.get(host_key, {})
 
     context = getattr(args, "context", None)
     dialectic = getattr(args, "dialectic", None)
@@ -439,11 +448,12 @@ def cmd_tokens(args) -> None:
 
     changed = False
     if context is not None:
-        cfg.setdefault("hosts", {}).setdefault(HOST, {})["contextTokens"] = context
+        cfg.setdefault("hosts", {}).setdefault(host_key, {})["contextTokens"] = context
         print(f"  context tokens → {context}")
         changed = True
+
     if dialectic is not None:
-        cfg.setdefault("hosts", {}).setdefault(HOST, {})["dialecticMaxChars"] = dialectic
+        cfg.setdefault("hosts", {}).setdefault(host_key, {})["dialecticMaxChars"] = dialectic
         print(f"  dialectic cap  → {dialectic} chars")
         changed = True
 

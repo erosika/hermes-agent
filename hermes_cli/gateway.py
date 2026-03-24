@@ -126,14 +126,14 @@ SERVICE_DESCRIPTION = "Hermes Agent Gateway - Messaging Platform Integration"
 
 
 def get_service_name() -> str:
-    """Derive a systemd service name scoped to this HERMES_HOME.
-
-    Default ``~/.hermes`` returns ``hermes-gateway`` (backward compatible).
-    Any other HERMES_HOME appends a short hash so multiple installations
-    can each have their own systemd service without conflicting.
-    """
+    """Derive a gateway service name scoped to the active Hermes instance/home."""
     import hashlib
     from pathlib import Path as _Path  # local import to avoid monkeypatch interference
+
+    instance = (os.getenv("HERMES_INSTANCE", "") or "").strip().lower()
+    if instance and instance != "main":
+        return f"{_SERVICE_BASE}-{instance}"
+
     home = _Path(os.getenv("HERMES_HOME", _Path.home() / ".hermes")).resolve()
     default = (_Path.home() / ".hermes").resolve()
     if home == default:
@@ -368,8 +368,15 @@ def print_systemd_linger_guidance() -> None:
         print("  If you want the gateway user service to survive logout, run:")
         print("  sudo loginctl enable-linger $USER")
 
+def get_launchd_label() -> str:
+    instance = (os.getenv("HERMES_INSTANCE", "") or "").strip().lower()
+    if instance and instance != "main":
+        return f"ai.hermes.gateway.{instance}"
+    return "ai.hermes.gateway"
+
+
 def get_launchd_plist_path() -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / "ai.hermes.gateway.plist"
+    return Path.home() / "Library" / "LaunchAgents" / f"{get_launchd_label()}.plist"
 
 def _detect_venv_dir() -> Path | None:
     """Detect the active virtualenv directory.
@@ -438,6 +445,9 @@ def generate_systemd_unit(system: bool = False, run_as_user: str | None = None) 
     sane_path = ":".join(path_entries)
 
     hermes_home = str(Path(os.getenv("HERMES_HOME", Path.home() / ".hermes")).resolve())
+    hermes_base_home = str(Path(os.getenv("HERMES_BASE_HOME", hermes_home)).resolve())
+    hermes_instance = (os.getenv("HERMES_INSTANCE", "main") or "main").strip() or "main"
+    hermes_honcho_host = (os.getenv("HERMES_HONCHO_HOST", "hermes") or "hermes").strip() or "hermes"
 
     if system:
         username, group_name, home_dir = _system_service_identity(run_as_user)
@@ -459,7 +469,10 @@ Environment="USER={username}"
 Environment="LOGNAME={username}"
 Environment="PATH={sane_path}"
 Environment="VIRTUAL_ENV={venv_dir}"
+Environment="HERMES_BASE_HOME={hermes_base_home}"
 Environment="HERMES_HOME={hermes_home}"
+Environment="HERMES_INSTANCE={hermes_instance}"
+Environment="HERMES_HONCHO_HOST={hermes_honcho_host}"
 Restart=on-failure
 RestartSec=30
 KillMode=mixed
@@ -484,7 +497,10 @@ ExecStart={python_path} -m hermes_cli.main gateway run --replace
 WorkingDirectory={working_dir}
 Environment="PATH={sane_path}"
 Environment="VIRTUAL_ENV={venv_dir}"
+Environment="HERMES_BASE_HOME={hermes_base_home}"
 Environment="HERMES_HOME={hermes_home}"
+Environment="HERMES_INSTANCE={hermes_instance}"
+Environment="HERMES_HONCHO_HOST={hermes_honcho_host}"
 Restart=on-failure
 RestartSec=30
 KillMode=mixed
@@ -757,13 +773,18 @@ def generate_launchd_plist() -> str:
     working_dir = str(PROJECT_ROOT)
     log_dir = get_hermes_home() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    
+    label = get_launchd_label()
+    hermes_home = str(get_hermes_home().resolve())
+    hermes_base_home = str(Path(os.getenv("HERMES_BASE_HOME", hermes_home)).resolve())
+    hermes_instance = (os.getenv("HERMES_INSTANCE", "main") or "main").strip() or "main"
+    hermes_honcho_host = (os.getenv("HERMES_HONCHO_HOST", "hermes") or "hermes").strip() or "hermes"
+
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>ai.hermes.gateway</string>
+    <string>{label}</string>
     
     <key>ProgramArguments</key>
     <array>
@@ -777,6 +798,18 @@ def generate_launchd_plist() -> str:
     
     <key>WorkingDirectory</key>
     <string>{working_dir}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HERMES_BASE_HOME</key>
+        <string>{hermes_base_home}</string>
+        <key>HERMES_HOME</key>
+        <string>{hermes_home}</string>
+        <key>HERMES_INSTANCE</key>
+        <string>{hermes_instance}</string>
+        <key>HERMES_HONCHO_HOST</key>
+        <string>{hermes_honcho_host}</string>
+    </dict>
     
     <key>RunAtLoad</key>
     <true/>
@@ -865,18 +898,19 @@ def launchd_uninstall():
 def launchd_start():
     refresh_launchd_plist_if_needed()
     plist_path = get_launchd_plist_path()
+    label = get_launchd_label()
     try:
-        subprocess.run(["launchctl", "start", "ai.hermes.gateway"], check=True)
+        subprocess.run(["launchctl", "start", label], check=True)
     except subprocess.CalledProcessError as e:
         if e.returncode != 3 or not plist_path.exists():
             raise
         print("↻ launchd job was unloaded; reloading service definition")
         subprocess.run(["launchctl", "load", str(plist_path)], check=True)
-        subprocess.run(["launchctl", "start", "ai.hermes.gateway"], check=True)
+        subprocess.run(["launchctl", "start", label], check=True)
     print("✓ Service started")
 
 def launchd_stop():
-    subprocess.run(["launchctl", "stop", "ai.hermes.gateway"], check=True)
+    subprocess.run(["launchctl", "stop", get_launchd_label()], check=True)
     print("✓ Service stopped")
 
 def _wait_for_gateway_exit(timeout: float = 10.0, force_after: float = 5.0):
@@ -931,8 +965,9 @@ def launchd_restart():
 
 def launchd_status(deep: bool = False):
     plist_path = get_launchd_plist_path()
+    label = get_launchd_label()
     result = subprocess.run(
-        ["launchctl", "list", "ai.hermes.gateway"],
+        ["launchctl", "list", label],
         capture_output=True,
         text=True
     )
@@ -1437,7 +1472,7 @@ def _is_service_running() -> bool:
         return False
     elif is_macos() and get_launchd_plist_path().exists():
         result = subprocess.run(
-            ["launchctl", "list", "ai.hermes.gateway"],
+            ["launchctl", "list", get_launchd_label()],
             capture_output=True, text=True
         )
         return result.returncode == 0

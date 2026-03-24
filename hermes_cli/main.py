@@ -54,11 +54,16 @@ from typing import Optional
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Load .env from ~/.hermes/.env first, then project root as dev fallback.
+# Resolve named instance selection before any config-heavy imports so HERMES_HOME
+# points at the right instance-local home during module import.
+from hermes_cli.instance_runtime import bootstrap_instance_env
+bootstrap_instance_env(sys.argv[1:])
+
+# Load .env from the resolved Hermes home first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
 from hermes_cli.config import get_hermes_home
 from hermes_cli.env_loader import load_hermes_dotenv
-load_hermes_dotenv(project_env=PROJECT_ROOT / '.env')
+load_hermes_dotenv(hermes_home=get_hermes_home(), project_env=PROJECT_ROOT / '.env')
 
 
 import logging
@@ -3042,6 +3047,13 @@ For more help on a command:
         help="Show version and exit"
     )
     parser.add_argument(
+        "--instance",
+        dest="instance_name",
+        metavar="NAME",
+        default=None,
+        help="Run Hermes as a named instance (isolated home, sessions, gateway state, and Honcho host)"
+    )
+    parser.add_argument(
         "--resume", "-r",
         metavar="SESSION",
         default=None,
@@ -4141,7 +4153,7 @@ For more help on a command:
     # Pre-process argv so unquoted multi-word session names after -c / -r
     # are merged into a single token before argparse sees them.
     # e.g. ``hermes -c Pokemon Agent Dev`` → ``hermes -c 'Pokemon Agent Dev'``
-    _processed_argv = _coalesce_session_name_args(sys.argv[1:])
+    _processed_argv = _coalesce_session_name_args(bootstrap_instance_env(sys.argv[1:]))
     args = parser.parse_args(_processed_argv)
     
     # Handle --version flag
