@@ -4700,6 +4700,7 @@ class AIAgent:
                 context=function_args.get("context"),
                 toolsets=function_args.get("toolsets"),
                 tasks=function_args.get("tasks"),
+                target_instance=function_args.get("target_instance"),
                 max_iterations=function_args.get("max_iterations"),
                 parent_agent=self,
             )
@@ -5050,6 +5051,7 @@ class AIAgent:
                         context=function_args.get("context"),
                         toolsets=function_args.get("toolsets"),
                         tasks=tasks_arg,
+                        target_instance=function_args.get("target_instance"),
                         max_iterations=function_args.get("max_iterations"),
                         parent_agent=self,
                     )

@@ -22,7 +22,11 @@ logger = logging.getLogger(__name__)
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
+
+from hermes_cli.instance_runtime import build_instance_runtime, get_active_instance_name
+from hermes_state import SessionDB
 
 
 # Tools that children must never have access to
@@ -38,6 +42,34 @@ MAX_CONCURRENT_CHILDREN = 3
 MAX_DEPTH = 2  # parent (0) -> child (1) -> grandchild rejected (2)
 DEFAULT_MAX_ITERATIONS = 50
 DEFAULT_TOOLSETS = ["terminal", "file", "web"]
+
+
+@contextmanager
+def _with_target_instance(target_instance: Optional[str]):
+    """Temporarily scope child-agent construction to a named Hermes instance."""
+    if not target_instance:
+        yield None
+        return
+
+    previous = {
+        "HERMES_INSTANCE": os.environ.get("HERMES_INSTANCE"),
+        "HERMES_BASE_HOME": os.environ.get("HERMES_BASE_HOME"),
+        "HERMES_HOME": os.environ.get("HERMES_HOME"),
+        "HERMES_HONCHO_HOST": os.environ.get("HERMES_HONCHO_HOST"),
+    }
+    runtime = build_instance_runtime(target_instance)
+    os.environ["HERMES_INSTANCE"] = runtime.instance
+    os.environ["HERMES_BASE_HOME"] = str(runtime.base_home)
+    os.environ["HERMES_HOME"] = str(runtime.home)
+    os.environ["HERMES_HONCHO_HOST"] = runtime.honcho_host
+    try:
+        yield runtime
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def check_delegate_requirements() -> bool:
@@ -155,6 +187,7 @@ def _build_child_agent(
     model: Optional[str],
     max_iterations: int,
     parent_agent,
+    target_instance: Optional[str] = None,
     # Credential overrides from delegation config (provider:model resolution)
     override_provider: Optional[str] = None,
     override_base_url: Optional[str] = None,
@@ -188,7 +221,7 @@ def _build_child_agent(
     if (not parent_api_key) and hasattr(parent_agent, "_client_kwargs"):
         parent_api_key = parent_agent._client_kwargs.get("api_key")
 
-    # Build progress callback to relay tool calls to parent display
+    # Build progress callback to relay child agent tool calls to the parent display
     child_progress_cb = _build_child_progress_callback(task_index, parent_agent)
 
     # Share the parent's iteration budget so subagent tool calls
@@ -204,35 +237,43 @@ def _build_child_agent(
     effective_acp_command = getattr(parent_agent, "acp_command", None)
     effective_acp_args = list(getattr(parent_agent, "acp_args", []) or [])
 
-    child = AIAgent(
-        base_url=effective_base_url,
-        api_key=effective_api_key,
-        model=effective_model,
-        provider=effective_provider,
-        api_mode=effective_api_mode,
-        acp_command=effective_acp_command,
-        acp_args=effective_acp_args,
-        max_iterations=max_iterations,
-        max_tokens=getattr(parent_agent, "max_tokens", None),
-        reasoning_config=getattr(parent_agent, "reasoning_config", None),
-        prefill_messages=getattr(parent_agent, "prefill_messages", None),
-        enabled_toolsets=child_toolsets,
-        quiet_mode=True,
-        ephemeral_system_prompt=child_prompt,
-        log_prefix=f"[subagent-{task_index}]",
-        platform=parent_agent.platform,
-        skip_context_files=True,
-        skip_memory=True,
-        clarify_callback=None,
-        session_db=getattr(parent_agent, '_session_db', None),
-        providers_allowed=parent_agent.providers_allowed,
-        providers_ignored=parent_agent.providers_ignored,
-        providers_order=parent_agent.providers_order,
-        provider_sort=parent_agent.provider_sort,
-        tool_progress_callback=child_progress_cb,
-        iteration_budget=shared_budget,
-    )
-    # Set delegation depth so children can't spawn grandchildren
+    active_instance = get_active_instance_name()
+    requested_instance = target_instance if target_instance and target_instance != active_instance else None
+    with _with_target_instance(requested_instance) as runtime:
+        child_session_db = getattr(parent_agent, "_session_db", None)
+        if runtime is not None:
+            child_session_db = SessionDB(db_path=runtime.home / "state.db")
+
+        child = AIAgent(
+            base_url=effective_base_url,
+            api_key=effective_api_key,
+            model=effective_model,
+            provider=effective_provider,
+            api_mode=effective_api_mode,
+            acp_command=effective_acp_command,
+            acp_args=effective_acp_args,
+            max_iterations=max_iterations,
+            max_tokens=getattr(parent_agent, "max_tokens", None),
+            reasoning_config=getattr(parent_agent, "reasoning_config", None),
+            prefill_messages=getattr(parent_agent, "prefill_messages", None),
+            enabled_toolsets=child_toolsets,
+            quiet_mode=True,
+            ephemeral_system_prompt=child_prompt,
+            log_prefix=f"[subagent-{task_index}]",
+            platform=parent_agent.platform,
+            skip_context_files=True,
+            skip_memory=True,
+            clarify_callback=None,
+            session_db=child_session_db,
+            providers_allowed=parent_agent.providers_allowed,
+            providers_ignored=parent_agent.providers_ignored,
+            providers_order=parent_agent.providers_order,
+            provider_sort=parent_agent.provider_sort,
+            tool_progress_callback=child_progress_cb,
+            iteration_budget=shared_budget,
+        )
+
+    child._delegate_target_instance = requested_instance
     child._delegate_depth = getattr(parent_agent, '_delegate_depth', 0) + 1
 
     # Register child for interrupt propagation
@@ -268,8 +309,12 @@ def _run_single_child(
     _saved_tool_names = getattr(child, "_delegate_saved_tool_names",
                                 list(model_tools._last_resolved_tool_names))
 
+    target_instance = getattr(child, "_delegate_target_instance", None)
+    if not isinstance(target_instance, str) or not target_instance.strip():
+        target_instance = None
     try:
-        result = child.run_conversation(user_message=goal)
+        with _with_target_instance(target_instance):
+            result = child.run_conversation(user_message=goal)
 
         # Flush any remaining batched progress to gateway
         if child_progress_cb and hasattr(child_progress_cb, '_flush'):
@@ -400,15 +445,15 @@ def delegate_task(
     context: Optional[str] = None,
     toolsets: Optional[List[str]] = None,
     tasks: Optional[List[Dict[str, Any]]] = None,
-    max_iterations: Optional[int] = None,
+    target_instance: Optional[str] = None,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
     parent_agent=None,
 ) -> str:
-    """
-    Spawn one or more child agents to handle delegated tasks.
+    """Spawn one or more child agents to handle delegated tasks.
 
     Supports two modes:
       - Single: provide goal (+ optional context, toolsets)
-      - Batch:  provide tasks array [{goal, context, toolsets}, ...]
+      - Batch:  provide tasks array [{goal, context, toolsets, target_instance}, ...]
 
     Returns JSON with results array, one entry per task.
     """
@@ -444,7 +489,12 @@ def delegate_task(
     if tasks and isinstance(tasks, list):
         task_list = tasks[:MAX_CONCURRENT_CHILDREN]
     elif goal and isinstance(goal, str) and goal.strip():
-        task_list = [{"goal": goal, "context": context, "toolsets": toolsets}]
+        task_list = [{
+            "goal": goal,
+            "context": context,
+            "toolsets": toolsets,
+            "target_instance": target_instance,
+        }]
     else:
         return json.dumps({"error": "Provide either 'goal' (single task) or 'tasks' (batch)."})
 
@@ -476,25 +526,52 @@ def delegate_task(
     try:
         for i, t in enumerate(task_list):
             child = _build_child_agent(
-                task_index=i, goal=t["goal"], context=t.get("context"),
-                toolsets=t.get("toolsets") or toolsets, model=creds["model"],
-                max_iterations=effective_max_iter, parent_agent=parent_agent,
-                override_provider=creds["provider"], override_base_url=creds["base_url"],
+                task_index=i,
+                goal=t["goal"],
+                context=t.get("context"),
+                toolsets=t.get("toolsets") or toolsets,
+                model=creds["model"],
+                max_iterations=effective_max_iter,
+                parent_agent=parent_agent,
+                target_instance=t.get("target_instance") or target_instance,
+                override_provider=creds["provider"],
+                override_base_url=creds["base_url"],
                 override_api_key=creds["api_key"],
                 override_api_mode=creds["api_mode"],
             )
-            # Override with correct parent tool names (before child construction mutated global)
-            child._delegate_saved_tool_names = _parent_tool_names
+            # Preserve the parent-visible tool surface so child cleanup can restore it.
+            child._delegate_saved_tool_names = list(_parent_tool_names)
+
             children.append((i, t, child))
     finally:
         # Authoritative restore: reset global to parent's tool names after all children built
         _model_tools._last_resolved_tool_names = _parent_tool_names
 
-    if n_tasks == 1:
+    has_instance_scoped_child = any(getattr(child, "_delegate_target_instance", None) for _, _, child in children)
+
+    if n_tasks == 1 or has_instance_scoped_child:
         # Single task -- run directly (no thread pool overhead)
-        _i, _t, child = children[0]
-        result = _run_single_child(0, _t["goal"], child, parent_agent)
-        results.append(result)
+        # Instance-scoped children also run sequentially so process-global env
+        # switching remains correct during child execution.
+        completed_count = 0
+        spinner_ref = getattr(parent_agent, '_delegate_spinner', None)
+        for i, t, child in children:
+            entry = _run_single_child(i, t["goal"], child, parent_agent)
+            results.append(entry)
+            completed_count += 1
+            if n_tasks > 1:
+                label = task_labels[i] if i < len(task_labels) else f"Task {i}"
+                dur = entry.get("duration_seconds", 0)
+                status = entry.get("status", "?")
+                icon = "✓" if status == "completed" else "✗"
+                print_line = f"{icon} [{i+1}/{n_tasks}] {label}  ({dur}s)"
+                if spinner_ref:
+                    try:
+                        spinner_ref.print_above(print_line)
+                    except Exception:
+                        print(f"  {print_line}")
+                else:
+                    print(f"  {print_line}")
     else:
         # Batch -- run in parallel with per-task progress lines
         completed_count = 0
@@ -747,6 +824,10 @@ DELEGATE_TASK_SCHEMA = {
                             "items": {"type": "string"},
                             "description": "Toolsets for this specific task",
                         },
+                        "target_instance": {
+                            "type": "string",
+                            "description": "Optional named Hermes instance to run this task under.",
+                        },
                     },
                     "required": ["goal"],
                 },
@@ -755,6 +836,13 @@ DELEGATE_TASK_SCHEMA = {
                     "Batch mode: up to 3 tasks to run in parallel. Each gets "
                     "its own subagent with isolated context and terminal session. "
                     "When provided, top-level goal/context/toolsets are ignored."
+                ),
+            },
+            "target_instance": {
+                "type": "string",
+                "description": (
+                    "Optional named Hermes instance to run the delegated task under. "
+                    "When set, the child agent gets that instance's isolated local state."
                 ),
             },
             "max_iterations": {
@@ -782,6 +870,7 @@ registry.register(
         context=args.get("context"),
         toolsets=args.get("toolsets"),
         tasks=args.get("tasks"),
+        target_instance=args.get("target_instance"),
         max_iterations=args.get("max_iterations"),
         parent_agent=kw.get("parent_agent")),
     check_fn=check_delegate_requirements,

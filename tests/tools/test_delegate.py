@@ -61,6 +61,7 @@ class TestDelegateRequirements(unittest.TestCase):
         self.assertIn("tasks", props)
         self.assertIn("context", props)
         self.assertIn("toolsets", props)
+        self.assertIn("target_instance", props)
         self.assertIn("max_iterations", props)
         self.assertEqual(props["tasks"]["maxItems"], 3)
 
@@ -169,21 +170,22 @@ class TestDelegateTask(unittest.TestCase):
         self.assertEqual(mock_run.call_count, 3)
 
     @patch("tools.delegate_tool._run_single_child")
-    def test_batch_ignores_toplevel_goal(self, mock_run):
-        """When tasks array is provided, top-level goal/context/toolsets are ignored."""
+    @patch("tools.delegate_tool._build_child_agent")
+    def test_batch_uses_task_goal_not_toplevel_goal(self, mock_build, mock_run):
+        """When tasks are provided, each child should use the per-task goal."""
+        mock_build.return_value = MagicMock()
         mock_run.return_value = {
             "task_index": 0, "status": "completed",
             "summary": "Done", "api_calls": 1, "duration_seconds": 1.0
         }
         parent = _make_mock_parent()
-        result = json.loads(delegate_task(
+        json.loads(delegate_task(
             goal="This should be ignored",
             tasks=[{"goal": "Actual task"}],
             parent_agent=parent,
         ))
-        # The mock was called with the tasks array item, not the top-level goal
-        call_args = mock_run.call_args
-        self.assertEqual(call_args.kwargs.get("goal") or call_args[1].get("goal", call_args[0][1] if len(call_args[0]) > 1 else None), "Actual task")
+
+        self.assertEqual(mock_build.call_args.kwargs["goal"], "Actual task")
 
     @patch("tools.delegate_tool._run_single_child")
     def test_failed_child_included_in_results(self, mock_run):
@@ -228,7 +230,7 @@ class TestDelegateTask(unittest.TestCase):
     def test_child_inherits_runtime_credentials(self):
         parent = _make_mock_parent(depth=0)
         parent.base_url = "https://chatgpt.com/backend-api/codex"
-        parent.api_key = "codex-token"
+        parent.api_key="***"
         parent.provider = "openai-codex"
         parent.api_mode = "codex_responses"
 
@@ -248,6 +250,68 @@ class TestDelegateTask(unittest.TestCase):
             self.assertEqual(kwargs["api_key"], parent.api_key)
             self.assertEqual(kwargs["provider"], parent.provider)
             self.assertEqual(kwargs["api_mode"], parent.api_mode)
+
+    def test_child_target_instance_uses_instance_scoped_runtime_and_session_db(self):
+        parent = _make_mock_parent(depth=0)
+        parent._session_db = MagicMock(name="parent_db")
+
+        captured = {}
+        fake_db = MagicMock(name="child_db")
+
+        def fake_agent_ctor(**kwargs):
+            captured["construct_env"] = {
+                "HERMES_INSTANCE": os.getenv("HERMES_INSTANCE"),
+                "HERMES_HOME": os.getenv("HERMES_HOME"),
+                "HERMES_BASE_HOME": os.getenv("HERMES_BASE_HOME"),
+                "HERMES_HONCHO_HOST": os.getenv("HERMES_HONCHO_HOST"),
+            }
+            captured["kwargs"] = kwargs
+            child = MagicMock()
+
+            def _run_conversation(*args, **run_kwargs):
+                captured["run_env"] = {
+                    "HERMES_INSTANCE": os.getenv("HERMES_INSTANCE"),
+                    "HERMES_HOME": os.getenv("HERMES_HOME"),
+                    "HERMES_BASE_HOME": os.getenv("HERMES_BASE_HOME"),
+                    "HERMES_HONCHO_HOST": os.getenv("HERMES_HONCHO_HOST"),
+                }
+                return {
+                    "final_response": "ok",
+                    "completed": True,
+                    "api_calls": 1,
+                }
+
+            child.run_conversation.side_effect = _run_conversation
+            return child
+
+        with patch.dict(os.environ, {
+            "HERMES_INSTANCE": "main",
+            "HERMES_BASE_HOME": "/tmp/hermes-home",
+            "HERMES_HOME": "/tmp/hermes-home",
+            "HERMES_HONCHO_HOST": "hermes",
+        }, clear=False), \
+             patch("run_agent.AIAgent", side_effect=fake_agent_ctor) as MockAgent, \
+             patch("tools.delegate_tool.SessionDB", return_value=fake_db) as MockSessionDB:
+            delegate_task(goal="Run on dreamer", target_instance="dreamer", parent_agent=parent)
+
+            MockSessionDB.assert_called_once()
+            db_path = MockSessionDB.call_args.kwargs.get("db_path") or MockSessionDB.call_args.args[0]
+            self.assertTrue(str(db_path).endswith("/instances/dreamer/state.db"))
+            self.assertEqual(captured["construct_env"]["HERMES_INSTANCE"], "dreamer")
+            self.assertTrue(captured["construct_env"]["HERMES_HOME"].endswith("/instances/dreamer"))
+            self.assertEqual(captured["construct_env"]["HERMES_HONCHO_HOST"], "hermes.dreamer")
+            self.assertEqual(captured["run_env"]["HERMES_INSTANCE"], "dreamer")
+            self.assertTrue(captured["run_env"]["HERMES_HOME"].endswith("/instances/dreamer"))
+            self.assertEqual(captured["run_env"]["HERMES_HONCHO_HOST"], "hermes.dreamer")
+            self.assertIs(captured["kwargs"]["session_db"], fake_db)
+
+            # Parent instance env is restored after delegated execution completes.
+            self.assertEqual(os.getenv("HERMES_INSTANCE"), "main")
+            self.assertEqual(os.getenv("HERMES_HOME"), "/tmp/hermes-home")
+            self.assertEqual(os.getenv("HERMES_HONCHO_HOST"), "hermes")
+
+        # patch.dict should also restore the original process environment after the test.
+        self.assertIsNone(os.getenv("HERMES_INSTANCE"))
 
 
 class TestToolNamePreservation(unittest.TestCase):
@@ -318,6 +382,21 @@ class TestToolNamePreservation(unittest.TestCase):
                     f"_build_child_agent raised NameError — "
                     f"_saved_tool_names leaked back into wrong scope: {exc}"
                 )
+
+    def test_global_tool_names_restored_if_child_build_fails(self):
+        """delegate_task should restore the parent's tool names even if build fails."""
+        import model_tools
+
+        parent = _make_mock_parent(depth=0)
+        original_tools = ["terminal", "read_file", "web_search"]
+        model_tools._last_resolved_tool_names = list(original_tools)
+
+        with patch("tools.delegate_tool._build_child_agent") as mock_build:
+            mock_build.side_effect = RuntimeError("boom during build")
+            with self.assertRaises(RuntimeError):
+                delegate_task(tasks=[{"goal": "a"}], parent_agent=parent)
+
+        self.assertEqual(model_tools._last_resolved_tool_names, original_tools)
 
     def test_saved_tool_names_set_on_child_before_run(self):
         """_run_single_child must set _delegate_saved_tool_names on the child

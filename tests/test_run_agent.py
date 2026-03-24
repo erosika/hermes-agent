@@ -1045,6 +1045,24 @@ class TestConcurrentToolExecution:
             )
             assert result == "result"
 
+    def test_invoke_delegate_task_forwards_target_instance(self, agent):
+        with patch("tools.delegate_tool.delegate_task", return_value='{"results": []}') as mock_delegate:
+            result = agent._invoke_tool(
+                "delegate_task",
+                {"goal": "test", "target_instance": "dreamer"},
+                "task-1",
+            )
+            mock_delegate.assert_called_once_with(
+                goal="test",
+                context=None,
+                toolsets=None,
+                tasks=None,
+                target_instance="dreamer",
+                max_iterations=None,
+                parent_agent=agent,
+            )
+            assert result == '{"results": []}'
+
     def test_invoke_tool_handles_agent_level_tools(self, agent):
         """_invoke_tool should handle todo tool directly."""
         with patch("tools.todo_tool.todo_tool", return_value='{"ok":true}') as mock_todo:
