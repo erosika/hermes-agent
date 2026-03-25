@@ -192,17 +192,17 @@ def bootstrap_instance_env(argv: Iterable[str]) -> list[str]:
 
     if selected:
         current_instance = selected
-    elif existing_base:
-        current_instance = os.getenv("HERMES_INSTANCE") or DEFAULT_INSTANCE_NAME
     elif current_home:
         current_instance = _infer_instance_from_home(Path(current_home).expanduser())
+    elif existing_base:
+        current_instance = os.getenv("HERMES_INSTANCE") or DEFAULT_INSTANCE_NAME
     else:
         current_instance = os.getenv("HERMES_INSTANCE") or DEFAULT_INSTANCE_NAME
 
-    if existing_base:
-        base_home = Path(existing_base).expanduser()
-    elif current_home:
+    if current_home:
         base_home = _derive_base_from_home(Path(current_home).expanduser())
+    elif existing_base:
+        base_home = Path(existing_base).expanduser()
     else:
         base_home = Path.home() / _DEFAULT_HOME_NAME
 
