@@ -48,11 +48,12 @@ def _resolve_api_key(cfg: dict) -> str:
 def _resolve_base_url(cfg: dict) -> str:
     """Resolve base URL with host -> root -> env fallback.
 
-    Accept snake_case, camelCase, and baseURL as a compatibility alias.
+    Prefer canonical camelCase `baseUrl`, while accepting `base_url`
+    and `baseURL` as compatibility aliases.
     """
     host_cfg = ((cfg.get("hosts") or {}).get(HOST) or {})
     for source in (host_cfg, cfg):
-        for key in ("base_url", "baseUrl", "baseURL"):
+        for key in ("baseUrl", "base_url", "baseURL"):
             value = source.get(key)
             if isinstance(value, str):
                 stripped = value.strip()
@@ -132,7 +133,7 @@ def cmd_setup(args) -> None:
     hosts = cfg.setdefault("hosts", {})
     hermes_host = hosts.setdefault(HOST, {})
 
-    # Connection settings — API key for hosted Honcho, base_url for local/self-hosted.
+    # Connection settings — API key for hosted Honcho, baseUrl for local/self-hosted.
     current_key = cfg.get("apiKey", "")
     masked = f"...{current_key[-8:]}" if len(current_key) > 8 else ("set" if current_key else "not set")
     print(f"  Current API key: {masked}")
@@ -144,7 +145,8 @@ def cmd_setup(args) -> None:
     print(f"  Current base URL: {current_base_url or 'not set'}")
     new_base_url = _prompt("Honcho base URL (optional for local/self-hosted)", default=current_base_url or None)
     if new_base_url:
-        hermes_host["base_url"] = new_base_url
+        hermes_host["baseUrl"] = new_base_url
+        hermes_host.pop("base_url", None)
 
     effective_key = _resolve_api_key(cfg)
     effective_base_url = _resolve_base_url(cfg)
