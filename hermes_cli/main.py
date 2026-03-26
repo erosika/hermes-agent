@@ -2691,9 +2691,11 @@ def cmd_update(args):
             text=True,
             check=True
         )
-        branch = result.stdout.strip()
+        head_branch = result.stdout.strip()
 
-        # Fall back to main if the current branch doesn't exist on the remote
+        # The update target is always main (or the current branch if it tracks
+        # a remote).  Fall back to main when the current branch has no remote.
+        branch = head_branch
         verify = subprocess.run(
             git_cmd + ["rev-parse", "--verify", f"origin/{branch}"],
             cwd=PROJECT_ROOT, capture_output=True, text=True,
@@ -2723,7 +2725,26 @@ def cmd_update(args):
 
         print("→ Pulling updates...")
         try:
-            subprocess.run(git_cmd + ["pull", "--ff-only", "origin", branch], cwd=PROJECT_ROOT, check=True)
+            if head_branch == branch:
+                # On the target branch -- try fast-forward, fall back to rebase.
+                try:
+                    subprocess.run(git_cmd + ["pull", "--ff-only", "origin", branch], cwd=PROJECT_ROOT, check=True)
+                except subprocess.CalledProcessError:
+                    print("  Fast-forward not possible, rebasing...")
+                    subprocess.run(git_cmd + ["pull", "--rebase", "origin", branch], cwd=PROJECT_ROOT, check=True)
+            else:
+                # On a different branch -- update the target ref without switching.
+                fetch_result = subprocess.run(
+                    git_cmd + ["fetch", "origin", f"{branch}:{branch}"],
+                    cwd=PROJECT_ROOT, capture_output=True, text=True,
+                )
+                if fetch_result.returncode != 0:
+                    # Local ref diverged -- force-update since user isn't on it.
+                    subprocess.run(
+                        git_cmd + ["branch", "-f", branch, f"origin/{branch}"],
+                        cwd=PROJECT_ROOT, check=True,
+                    )
+                print(f"  Updated local {branch} (staying on {head_branch})")
         finally:
             if auto_stash_ref is not None:
                 _restore_stashed_changes(
