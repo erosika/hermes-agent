@@ -32,9 +32,9 @@ Hermes supports both hosted Honcho and local/self-hosted Honcho.
 | Mode | What Hermes needs | Preferred config |
 |------|-------------------|------------------|
 | Hosted Honcho | `apiKey` | `~/.honcho/config.json` root `apiKey` |
-| Local/self-hosted Honcho | `base_url` | `~/.honcho/config.json` root or `hosts.hermes.base_url` |
+| Local/self-hosted Honcho | `baseUrl` | `~/.honcho/config.json` root or `hosts.hermes.baseUrl` |
 
-For local/self-hosted Honcho, `base_url` is enough — no API key required.
+For local/self-hosted Honcho, `baseUrl` is enough — no API key required.
 
 Minimal local example:
 
@@ -42,7 +42,7 @@ Minimal local example:
 {
   "hosts": {
     "hermes": {
-      "base_url": "http://localhost:8000",
+      "baseUrl": "http://localhost:8000",
       "enabled": true
     }
   }
@@ -62,7 +62,7 @@ Minimal hosted example:
 }
 ```
 
-Hermes auto-enables Honcho when either `apiKey` or `base_url` is present.
+Hermes auto-enables Honcho when either `apiKey` or `baseUrl` is present.
 
 For local/self-hosted deployment details, see the [Honcho self-hosting docs](https://docs.honcho.dev).
 
@@ -88,7 +88,7 @@ pip install 'honcho-ai>=2.0.1'
 
 For hosted Honcho, get an API key from [app.honcho.dev](https://app.honcho.dev) > Settings > API Keys.
 
-For local/self-hosted Honcho, configure a base URL instead of an API key.
+For local/self-hosted Honcho, configure `baseUrl` instead of an API key.
 
 #### 3. Configure
 
@@ -120,7 +120,7 @@ Local/self-hosted example:
 {
   "hosts": {
     "hermes": {
-      "base_url": "http://localhost:8000",
+      "baseUrl": "http://localhost:8000",
       "workspace": "hermes",
       "peerName": "your-name",
       "aiPeer": "hermes",
@@ -134,7 +134,7 @@ Local/self-hosted example:
 }
 ```
 
-`apiKey` lives at the root because it is a shared credential across all Honcho-enabled tools. `base_url` can be configured at the root or under `hosts.hermes`; host-level values win. For compatibility, Hermes also accepts `baseUrl` and `baseURL` when reading config, but `base_url` is the preferred spelling in docs and examples.
+`apiKey` lives at the root because it is a shared credential across all Honcho-enabled tools. `baseUrl` can be configured at the root or under `hosts.hermes`; host-level values win. For compatibility, Hermes also accepts `base_url` and `baseURL` when reading config, but `baseUrl` is the preferred spelling in docs and examples.
 
 You can also use environment variables:
 
@@ -160,14 +160,14 @@ Settings are scoped to `hosts.hermes` and fall back to root-level globals when t
 | Field | Default | Description |
 |-------|---------|-------------|
 | `apiKey` | — | Honcho API key for hosted Honcho (shared across all hosts) |
-| `base_url` | — | Base URL for local/self-hosted Honcho. Also accepts `baseUrl` and `baseURL` when reading config. |
+| `baseUrl` | — | Base URL for local/self-hosted Honcho. Also accepts `base_url` and `baseURL` when reading config. |
 | `sessions` | `{}` | Manual session name overrides per directory (shared) |
 
 **Host-level (`hosts.hermes`)**
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `base_url` | — | Host-specific base URL override for local/self-hosted Honcho. Also accepts `baseUrl` and `baseURL` when reading config. |
+| `baseUrl` | — | Host-specific base URL override for local/self-hosted Honcho. Also accepts `base_url` and `baseURL` when reading config. |
 | `workspace` | `"hermes"` | Workspace identifier |
 | `peerName` | *(derived)* | Your identity name for user modeling |
 | `aiPeer` | `"hermes"` | AI assistant identity name |
@@ -195,16 +195,16 @@ Hermes resolves connection settings in a predictable order.
 2. root `apiKey`
 3. `HONCHO_API_KEY`
 
-`base_url` resolution:
-1. `hosts.hermes.base_url`
-2. `hosts.hermes.baseUrl`
+`baseUrl` resolution:
+1. `hosts.hermes.baseUrl`
+2. `hosts.hermes.base_url`
 3. `hosts.hermes.baseURL`
-4. root `base_url`
-5. root `baseUrl`
+4. root `baseUrl`
+5. root `base_url`
 6. root `baseURL`
 7. `HONCHO_BASE_URL`
 
-For docs and examples, prefer `base_url`. `baseUrl` and `baseURL` are compatibility aliases accepted when reading existing config.
+For docs and examples, prefer `baseUrl`. `base_url` and `baseURL` are compatibility aliases accepted when reading existing config.
 
 ### Memory Modes
 
@@ -362,7 +362,7 @@ This means:
 
 ### Local/self-hosted instance is configured but Hermes still says no API key
 
-Make sure you configured `base_url` rather than only expecting an API key-based flow. For local/self-hosted Honcho, `base_url` is enough.
+Make sure you configured `baseUrl` rather than only expecting an API key-based flow. For local/self-hosted Honcho, `baseUrl` is enough.
 
 Check with:
 
@@ -385,8 +385,8 @@ Check these first:
 
 - `~/.honcho/config.json` is valid JSON
 - there are no trailing commas in the JSON file
-- `base_url` is spelled correctly in the example you copied
-- if you used an alias like `baseUrl` or `baseURL`, remember `base_url` is the canonical documented spelling
+- `baseUrl` is spelled correctly in the example you copied
+- if you used an alias like `base_url` or `baseURL`, remember `baseUrl` is the canonical documented spelling
 - `enabled` is not explicitly set to `false`
 
 ### Local/self-hosted Honcho is unreachable

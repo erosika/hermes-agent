@@ -46,7 +46,7 @@ def resolve_config_path() -> Path:
 
 _RECALL_MODE_ALIASES = {"auto": "hybrid"}
 _VALID_RECALL_MODES = {"hybrid", "context", "tools"}
-_BASE_URL_KEYS = ("base_url", "baseUrl", "baseURL")
+_BASE_URL_KEYS = ("baseUrl", "base_url", "baseURL")
 
 
 def _normalize_recall_mode(val: str) -> str:
@@ -83,7 +83,8 @@ def _resolve_base_url(*sources: dict[str, Any] | None) -> str | None:
     """Resolve base_url from one or more config dicts plus env fallback.
 
     Resolution order follows the given source order, then HONCHO_BASE_URL.
-    Accepts snake_case, camelCase, and baseURL as a compatibility alias.
+    Prefers canonical camelCase `baseUrl`, while accepting `base_url`
+    and `baseURL` as compatibility aliases.
     """
     for source in sources:
         if not isinstance(source, dict):

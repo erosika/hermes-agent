@@ -47,6 +47,13 @@ class TestResolveBaseUrl:
         }
         assert _resolve_base_url(cfg) == "http://host:8000"
 
+    def test_prefers_canonical_baseUrl_within_same_scope(self):
+        cfg = {
+            "base_url": "http://root-snake:8000",
+            "baseUrl": "http://root-camel:8000",
+        }
+        assert _resolve_base_url(cfg) == "http://root-camel:8000"
+
     def test_accepts_root_level_aliases(self):
         assert _resolve_base_url({"baseURL": "http://root:8001"}) == "http://root:8001"
 

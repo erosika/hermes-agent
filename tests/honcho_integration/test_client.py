@@ -223,6 +223,18 @@ class TestFromGlobalConfig:
             config = HonchoClientConfig.from_global_config(config_path=config_file)
         assert config.base_url == "http://config-host:9000"
 
+    def test_base_url_prefers_canonical_root_camel_case_when_multiple_aliases_exist(self, tmp_path):
+        """baseUrl should win over compatibility aliases within the same config scope."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "base_url": "http://config-host:9001",
+            "baseUrl": "http://config-host:9002",
+            "baseURL": "http://config-host:9003",
+        }))
+
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.base_url == "http://config-host:9002"
+
     def test_base_url_from_config_root_snake_case(self, tmp_path):
         """base_url in config root is also accepted for local/self-hosted instances."""
         config_file = tmp_path / "config.json"
