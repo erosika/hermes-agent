@@ -2447,33 +2447,40 @@ class AIAgent:
         try:
             self._honcho.prefetch_context(self._honcho_session_key, user_message)
             self._honcho.prefetch_dialectic(self._honcho_session_key, user_message or "What were we working on?")
+            self._honcho.increment_turn(self._honcho_session_key)
         except Exception as exc:
             logger.debug("Honcho background prefetch failed (non-fatal): %s", exc)
 
     def _honcho_prefetch(self, user_message: str) -> str:
-        """Assemble the first-turn Honcho context from the pre-warmed cache."""
+        """Assemble Honcho context from the pre-warmed cache.
+
+        Respects per-component injection toggles from honcho.yaml so users
+        can disable representation, card, AI peer data, or dialectic
+        independently.
+        """
         if not self._honcho or not self._honcho_session_key:
             return ""
         try:
+            hcfg = getattr(self, '_honcho_config', None)
             parts = []
 
             ctx = self._honcho.pop_context_result(self._honcho_session_key)
             if ctx:
                 rep = ctx.get("representation", "")
                 card = ctx.get("card", "")
-                if rep:
+                if rep and (not hcfg or hcfg.inject_representation):
                     parts.append(f"## User representation\n{rep}")
-                if card:
+                if card and (not hcfg or hcfg.inject_card):
                     parts.append(card)
                 ai_rep = ctx.get("ai_representation", "")
                 ai_card = ctx.get("ai_card", "")
-                if ai_rep:
+                if ai_rep and (not hcfg or hcfg.inject_ai_representation):
                     parts.append(f"## AI peer representation\n{ai_rep}")
-                if ai_card:
+                if ai_card and (not hcfg or hcfg.inject_ai_card):
                     parts.append(ai_card)
 
             dialectic = self._honcho.pop_dialectic_result(self._honcho_session_key)
-            if dialectic:
+            if dialectic and (not hcfg or hcfg.inject_dialectic):
                 parts.append(f"## Continuity synthesis\n{dialectic}")
 
             if not parts:
