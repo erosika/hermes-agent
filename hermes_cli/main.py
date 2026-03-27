@@ -2996,6 +2996,7 @@ def _coalesce_session_name_args(argv: list) -> list:
         "chat", "model", "gateway", "setup", "whatsapp", "login", "logout",
         "status", "cron", "doctor", "config", "pairing", "skills", "tools",
         "mcp", "sessions", "insights", "version", "update", "uninstall",
+        "instance",
     }
     _SESSION_FLAGS = {"-c", "--continue", "-r", "--resume"}
 
@@ -4172,7 +4173,194 @@ For more help on a command:
             sys.exit(1)
 
     acp_parser.set_defaults(func=cmd_acp)
-    
+
+    # =========================================================================
+    # instance command
+    # =========================================================================
+    instance_parser = subparsers.add_parser(
+        "instance",
+        help="Manage Hermes named instances (create, list, show, delete)",
+        description="Create and manage isolated Hermes instances",
+    )
+    instance_subparsers = instance_parser.add_subparsers(dest="instance_action")
+
+    instance_list_parser = instance_subparsers.add_parser("list", help="List all known instances")
+
+    instance_create_parser = instance_subparsers.add_parser("create", help="Create a new instance")
+    instance_create_parser.add_argument("name", help="Instance name (lowercase, letters/numbers/hyphens/underscores)")
+    instance_create_parser.add_argument("--clone", metavar="SOURCE", help="Clone config/.env/SOUL.md from another instance")
+
+    instance_delete_parser = instance_subparsers.add_parser("delete", help="Delete an instance")
+    instance_delete_parser.add_argument("name", help="Instance name to delete")
+    instance_delete_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
+
+    instance_show_parser = instance_subparsers.add_parser("show", help="Show instance details")
+    instance_show_parser.add_argument("name", help="Instance name to inspect")
+
+    def cmd_instance(args):
+        import json as _json
+        import shutil
+        from hermes_cli.instance_runtime import (
+            DEFAULT_INSTANCE_NAME,
+            build_instance_runtime,
+            get_active_instance_name,
+            get_base_hermes_home,
+            get_instance_home,
+            get_instance_registry_path,
+            normalize_instance_name,
+            register_instance,
+        )
+
+        action = getattr(args, "instance_action", None)
+        base_home = get_base_hermes_home()
+
+        if action == "list":
+            # Load registry
+            registry_path = get_instance_registry_path(base_home)
+            registry: dict = {}
+            if registry_path.exists():
+                try:
+                    payload = _json.loads(registry_path.read_text(encoding="utf-8"))
+                    registry = payload.get("instances", {})
+                except Exception:
+                    pass
+
+            # Scan instances/ directory for unregistered ones
+            instances_dir = base_home / "instances"
+            if instances_dir.is_dir():
+                for child in sorted(instances_dir.iterdir()):
+                    if child.is_dir() and child.name not in registry:
+                        registry[child.name] = {
+                            "home": str(child),
+                            "honcho_host": f"hermes.{child.name}",
+                            "last_used_at": "",
+                        }
+
+            # Always include main
+            if DEFAULT_INSTANCE_NAME not in registry:
+                registry[DEFAULT_INSTANCE_NAME] = {
+                    "home": str(base_home),
+                    "honcho_host": "hermes",
+                    "last_used_at": "",
+                }
+
+            active = get_active_instance_name()
+            print(f"{'':2} {'Name':<20} {'Home':<40} {'Honcho Host':<25} {'Last Used'}")
+            print("-" * 110)
+            for name in sorted(registry.keys()):
+                entry = registry[name]
+                marker = "\u25c6" if name == active else " "
+                home = entry.get("home", "")
+                honcho = entry.get("honcho_host", "")
+                last_used = entry.get("last_used_at", "")
+                if last_used:
+                    last_used = last_used[:19]  # trim to readable length
+                print(f"{marker:2} {name:<20} {home:<40} {honcho:<25} {last_used}")
+
+        elif action == "create":
+            try:
+                name = normalize_instance_name(args.name)
+            except ValueError as exc:
+                print(f"Error: {exc}")
+                return
+            if name == DEFAULT_INSTANCE_NAME:
+                print("Error: Cannot create the 'main' instance — it already exists.")
+                return
+            home = get_instance_home(name, base_home=base_home)
+            if home.exists():
+                print(f"Error: Instance directory already exists: {home}")
+                return
+            subdirs = [
+                "memories", "sessions", "skills", "skins", "logs",
+                "plans", "workspace", "audio_cache", "image_cache",
+            ]
+            home.mkdir(parents=True, exist_ok=True)
+            for sd in subdirs:
+                (home / sd).mkdir(exist_ok=True)
+
+            # Clone from source if requested
+            if args.clone:
+                try:
+                    src_name = normalize_instance_name(args.clone)
+                except ValueError as exc:
+                    print(f"Error: Invalid source instance name: {exc}")
+                    shutil.rmtree(home)
+                    return
+                src_home = get_instance_home(src_name, base_home=base_home)
+                if not src_home.exists():
+                    print(f"Error: Source instance home does not exist: {src_home}")
+                    shutil.rmtree(home)
+                    return
+                for fname in ("config.yaml", ".env", "SOUL.md"):
+                    src_file = src_home / fname
+                    if src_file.exists():
+                        shutil.copy2(src_file, home / fname)
+
+            runtime = build_instance_runtime(name, base_home=base_home)
+            register_instance(runtime)
+            print(f"Instance '{name}' created at {home}")
+            print(f"  Honcho host: {runtime.honcho_host}")
+            print(f"\nNext steps:")
+            print(f"  hermes --instance {name} setup     # configure API keys")
+            print(f"  hermes --instance {name}            # start chatting")
+
+        elif action == "delete":
+            try:
+                name = normalize_instance_name(args.name)
+            except ValueError as exc:
+                print(f"Error: {exc}")
+                return
+            if name == DEFAULT_INSTANCE_NAME:
+                print("Error: Cannot delete the 'main' instance.")
+                return
+            home = get_instance_home(name, base_home=base_home)
+            if not args.yes:
+                try:
+                    confirm = input(f"Type '{name}' to confirm deletion: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print("\nAborted.")
+                    return
+                if confirm != name:
+                    print("Aborted.")
+                    return
+            if home.exists():
+                shutil.rmtree(home)
+            # Remove from registry
+            registry_path = get_instance_registry_path(base_home)
+            if registry_path.exists():
+                try:
+                    payload = _json.loads(registry_path.read_text(encoding="utf-8"))
+                    instances = payload.get("instances", {})
+                    instances.pop(name, None)
+                    registry_path.write_text(
+                        _json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass
+            print(f"Instance '{name}' deleted.")
+
+        elif action == "show":
+            try:
+                name = normalize_instance_name(args.name)
+            except ValueError as exc:
+                print(f"Error: {exc}")
+                return
+            home = get_instance_home(name, base_home=base_home)
+            print(f"Instance: {name}")
+            print(f"Home:     {home}")
+            if home.exists():
+                print(f"\nContents:")
+                for child in sorted(home.iterdir()):
+                    kind = "dir" if child.is_dir() else "file"
+                    print(f"  {child.name:<30} [{kind}]")
+            else:
+                print("  (directory does not exist)")
+        else:
+            instance_parser.print_help()
+
+    instance_parser.set_defaults(func=cmd_instance)
+
     # =========================================================================
     # Parse and execute
     # =========================================================================

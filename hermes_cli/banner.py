@@ -299,6 +299,13 @@ def build_welcome_banner(console: Console, model: str, cwd: str,
     left_lines.append(f"[dim {dim}]{cwd}[/]")
     if session_id:
         left_lines.append(f"[dim {session_color}]Session: {session_id}[/]")
+    try:
+        from hermes_cli.instance_runtime import get_active_instance_name
+        _instance_name = get_active_instance_name()
+        if _instance_name != "main":
+            left_lines.append(f"[dim {dim}]Instance: {_instance_name}[/]")
+    except Exception:
+        pass
     left_content = "\n".join(left_lines)
 
     right_lines = [f"[bold {accent}]Available Tools[/]"]

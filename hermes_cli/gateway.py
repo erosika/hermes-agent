@@ -27,7 +27,21 @@ from hermes_cli.colors import Colors, color
 # =============================================================================
 
 def find_gateway_pids() -> list:
-    """Find PIDs of running gateway processes."""
+    """Find PIDs of running gateway processes.
+
+    Checks the HERMES_HOME-scoped PID file first (profile-safe),
+    falling back to global process scan.
+    """
+    # Primary: HERMES_HOME-scoped PID file
+    try:
+        from gateway.status import get_running_pid
+        scoped_pid = get_running_pid()
+        if scoped_pid is not None:
+            return [scoped_pid]
+    except Exception:
+        pass
+
+    # Fallback: global process scan
     pids = []
     patterns = [
         "hermes_cli.main gateway",
