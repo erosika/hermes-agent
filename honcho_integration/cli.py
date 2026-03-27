@@ -282,6 +282,7 @@ def cmd_status(args) -> None:
     if hcfg.inject_ai_card: _inj.append("ai-card")
     if hcfg.inject_dialectic: _inj.append("dialectic")
     print(f"  Injecting:         {', '.join(_inj) or 'nothing'}")
+    print(f"  Inject frequency:  {hcfg.injection_frequency}")
 
     # Reasoning
     cap_info = f" (cap: {hcfg.dialectic_reasoning_cap})" if hcfg.dialectic_reasoning_cap != hcfg.dialectic_reasoning_level else " (no auto-bump)"
@@ -465,7 +466,8 @@ def cmd_tokens(args) -> None:
         ]
         enabled = [name for name, val in inj_items if val not in (False, "false", "0", "no")]
         disabled = [name for name, val in inj_items if val in (False, "false", "0", "no")]
-        print(f"  Injecting   {', '.join(enabled) or 'nothing'}")
+        inj_freq = hermes.get("injectionFrequency") or cfg.get("injectionFrequency") or "every-turn"
+        print(f"  Injecting   {', '.join(enabled) or 'nothing'}   frequency: {inj_freq}")
         if disabled:
             print(f"  Suppressed  {', '.join(disabled)}")
         print(f"\n  Set with: hermes honcho tokens [--context N] [--dialectic N]")
