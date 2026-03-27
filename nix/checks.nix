@@ -41,6 +41,7 @@ json.dump(sorted(leaf_paths(DEFAULT_CONFIG)), sys.stdout, indent=2)
         # Verify binaries exist and are executable
         package-contents = pkgs.runCommand "hermes-package-contents" { } ''
           set -e
+          export HOME=$(mktemp -d)
           echo "=== Checking binaries ==="
           test -x ${hermes-agent}/bin/hermes || (echo "FAIL: hermes binary missing"; exit 1)
           test -x ${hermes-agent}/bin/hermes-agent || (echo "FAIL: hermes-agent binary missing"; exit 1)
