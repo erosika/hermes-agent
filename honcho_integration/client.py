@@ -139,6 +139,12 @@ class HonchoClientConfig:
     # Integer N = every N turns.
     dialectic_cadence: str | int = "first-turn"
     context_cadence: str | int = "first-turn"
+    # Injection frequency: how many turns the cached Honcho context stays in
+    # the system prompt. Controls LLM input token cost.
+    # "first-turn" = inject on turn 0 only (model absorbs it, then it's dropped)
+    # "every-turn" = always inject (legacy behavior, costs tokens every turn)
+    # Integer N = inject for the first N turns, then suppress
+    injection_frequency: str | int = "every-turn"
     # Per-component injection toggles
     inject_representation: bool = True
     inject_card: bool = True
@@ -311,6 +317,11 @@ class HonchoClientConfig:
                 host_block.get("contextCadence")
                 or raw.get("contextCadence")
                 or "first-turn"
+            ),
+            injection_frequency=(
+                host_block.get("injectionFrequency")
+                or raw.get("injectionFrequency")
+                or "every-turn"
             ),
             inject_representation=_bool_opt(host_block, raw, "injectRepresentation", True),
             inject_card=_bool_opt(host_block, raw, "injectCard", True),

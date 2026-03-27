@@ -2454,14 +2454,26 @@ class AIAgent:
     def _honcho_prefetch(self, user_message: str) -> str:
         """Assemble Honcho context from the pre-warmed cache.
 
-        Respects per-component injection toggles from honcho.yaml so users
-        can disable representation, card, AI peer data, or dialectic
-        independently.
+        Respects per-component injection toggles and injection_frequency
+        from honcho.yaml. injection_frequency controls how many turns the
+        cached context stays in the system prompt — after that, it's dropped
+        to save LLM input tokens.
         """
         if not self._honcho or not self._honcho_session_key:
             return ""
         try:
             hcfg = getattr(self, '_honcho_config', None)
+
+            # Check injection frequency — skip if past the configured window
+            if hcfg:
+                freq = hcfg.injection_frequency
+                turn = self._honcho._turn_counts.get(self._honcho_session_key, 0)
+                if freq == "first-turn" and turn > 0:
+                    return ""
+                elif isinstance(freq, int) and freq > 0 and turn >= freq:
+                    return ""
+                # "every-turn" or unrecognized: always inject
+
             parts = []
 
             ctx = self._honcho.pop_context_result(self._honcho_session_key)
