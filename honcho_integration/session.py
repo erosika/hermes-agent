@@ -100,6 +100,9 @@ class HonchoSessionManager:
         self._write_frequency = write_frequency
         self._turn_counter: int = 0
 
+        # Track sessions whose file migration has already run (idempotent guard)
+        self._migrated: set[str] = set()
+
         # Prefetch caches: session_key → last result (consumed once per turn)
         self._context_cache: dict[str, dict] = {}
         self._dialectic_cache: dict[str, str] = {}
@@ -273,11 +276,25 @@ class HonchoSessionManager:
     def ensure_session(self, key: str) -> HonchoSession:
         """Lazily ensure a session exists, creating it on first access.
 
-        Identical to get_or_create() but intended for deferred init paths
+        Identical to get_or_create() but also runs the one-time memory-file
+        migration for newly created sessions. Intended for deferred init paths
         (e.g. recallMode=tools) where session creation is postponed until
         the first tool invocation.
         """
-        return self.get_or_create(key)
+        session = self.get_or_create(key)
+
+        if key not in self._migrated:
+            self._migrated.add(key)
+            if not session.messages:
+                try:
+                    from hermes_cli.config import get_hermes_home
+
+                    mem_dir = str(get_hermes_home() / "memories")
+                    self.migrate_memory_files(key, mem_dir)
+                except Exception as exc:
+                    logger.debug("Memory files migration failed (non-fatal): %s", exc)
+
+        return session
 
     def _flush_session(self, session: HonchoSession) -> bool:
         """Internal: write unsynced messages to Honcho synchronously."""
