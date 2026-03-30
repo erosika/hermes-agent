@@ -3101,6 +3101,15 @@ def cmd_update(args):
         except Exception:
             pass  # profiles module not available or no profiles
 
+        # Sync Honcho host blocks to all profiles
+        try:
+            from honcho_integration.cli import sync_honcho_profiles_quiet
+            synced = sync_honcho_profiles_quiet()
+            if synced:
+                print(f"\n-> Honcho: synced {synced} profile(s)")
+        except Exception:
+            pass  # honcho not installed or not configured
+
         # Check for config migrations
         print()
         print("→ Checking configuration for new options...")
@@ -4317,6 +4326,7 @@ For more help on a command:
     )
     honcho_subparsers.add_parser("enable", help="Enable Honcho for the active profile")
     honcho_subparsers.add_parser("disable", help="Disable Honcho for the active profile")
+    honcho_subparsers.add_parser("sync", help="Sync Honcho config to all existing profiles")
 
     def cmd_honcho(args):
         from honcho_integration.cli import honcho_command
