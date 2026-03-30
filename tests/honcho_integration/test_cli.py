@@ -70,7 +70,9 @@ class TestHasHonchoCredentials:
     def test_true_with_base_url_only(self):
         assert _has_honcho_credentials({"base_url": "http://local:8000"}) is True
 
-    def test_false_without_key_or_base_url(self):
+    def test_false_without_key_or_base_url(self, monkeypatch):
+        monkeypatch.delenv("HONCHO_API_KEY", raising=False)
+        monkeypatch.delenv("HONCHO_BASE_URL", raising=False)
         assert _has_honcho_credentials({}) is False
 
 

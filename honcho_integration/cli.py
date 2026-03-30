@@ -147,6 +147,7 @@ def cmd_setup(args) -> None:
     if new_base_url:
         hermes_host["baseUrl"] = new_base_url
         hermes_host.pop("base_url", None)
+        hermes_host.pop("baseURL", None)
 
     effective_key = _resolve_api_key(cfg)
     effective_base_url = _resolve_base_url(cfg)
@@ -600,8 +601,15 @@ def cmd_migrate(args) -> None:
     print("Step 1  Create a Honcho account")
     print()
     if has_key:
-        masked = f"...{cfg['apiKey'][-8:]}" if len(cfg["apiKey"]) > 8 else "set"
-        print(f"  Honcho API key already configured: {masked}")
+        api_key = _resolve_api_key(cfg)
+        base_url = _resolve_base_url(cfg)
+        if api_key:
+            masked = f"...{api_key[-8:]}" if len(api_key) > 8 else "set"
+            print(f"  Honcho API key already configured: {masked}")
+        else:
+            print("  Honcho API key: (none)")
+        if base_url:
+            print(f"  Honcho base URL: {base_url}")
         print("  Skip to Step 2.")
     else:
         print("  Honcho is a cloud memory service that gives Hermes persistent memory")
@@ -615,7 +623,7 @@ def cmd_migrate(args) -> None:
         if answer.lower() in ("y", "yes"):
             cmd_setup(args)
             cfg = _read_config()
-            has_key = bool(cfg.get("apiKey", ""))
+            has_key = _has_honcho_credentials(cfg)
         else:
             print()
             print("  Run 'hermes honcho setup' when ready, then re-run this walkthrough.")
