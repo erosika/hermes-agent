@@ -2497,6 +2497,11 @@ class AIAgent:
         """
         if not content or not content.strip():
             return json.dumps({"success": False, "error": "Content cannot be empty."})
+        # Block cron sessions from writing observations — same rationale as
+        # _honcho_sync: cron-generated observations are agent-internal, not
+        # user statements.  See #4052.
+        if self.platform == "cron":
+            return json.dumps({"success": False, "error": "Honcho writes disabled for cron sessions."})
         try:
             session = self._honcho.get_or_create(self._honcho_session_key)
             session.add_message("user", f"[observation] {content.strip()}")
@@ -2513,6 +2518,12 @@ class AIAgent:
     def _honcho_sync(self, user_content: str, assistant_content: str) -> None:
         """Sync the user/assistant message pair to Honcho."""
         if not self._honcho or not self._honcho_session_key:
+            return
+        # Skip Honcho writes for cron sessions — cron prompts contain system
+        # instructions ("You are Hermes...") that would be misattributed to
+        # the user peer, corrupting the user representation.  See #4052.
+        if self.platform == "cron":
+            logger.debug("Skipping Honcho sync for cron session")
             return
         try:
             session = self._honcho.get_or_create(self._honcho_session_key)
