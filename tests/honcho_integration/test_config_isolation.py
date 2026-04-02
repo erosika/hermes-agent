@@ -92,7 +92,7 @@ class TestWriteConfigIsolation:
 
 
 class TestReadConfigFallback:
-    """_read_config falls back to global when no local file exists."""
+    """_read_config falls back through the config chain."""
 
     def test_reads_local_when_exists(self, isolated_home):
         isolated_home["local_config"].write_text(
@@ -119,6 +119,69 @@ class TestReadConfigFallback:
         )
         cfg = _read_config()
         assert cfg["source"] == "local"
+
+
+class TestDefaultProfileFallback:
+    """Non-default profiles fall back to ~/.hermes/honcho.json (default profile config)."""
+
+    def test_profile_reads_default_profile_config(self, tmp_path, monkeypatch):
+        """A non-default profile with no local honcho.json reads ~/.hermes/honcho.json."""
+        home = tmp_path / "home"
+        default_hermes = home / ".hermes"
+        default_hermes.mkdir(parents=True)
+        profile_hermes = home / ".hermes" / "profiles" / "coder"
+        profile_hermes.mkdir(parents=True)
+        global_dir = home / ".honcho"
+        global_dir.mkdir(parents=True)
+
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+
+        # Default profile has honcho.json with host blocks
+        default_config = default_hermes / "honcho.json"
+        default_config.write_text(json.dumps({
+            "apiKey": "key",
+            "hosts": {
+                "hermes": {"peerName": "alice"},
+                "hermes.coder": {"peerName": "alice", "aiPeer": "hermes.coder"},
+            },
+        }))
+
+        # Global config has different data
+        (global_dir / "config.json").write_text(json.dumps({"source": "global"}))
+
+        import honcho_integration.client as _client_mod
+        import honcho_integration.cli as _cli_mod
+        monkeypatch.setattr(_client_mod, "GLOBAL_CONFIG_PATH", global_dir / "config.json")
+        monkeypatch.setattr(_cli_mod, "GLOBAL_CONFIG_PATH", global_dir / "config.json")
+
+        # Profile's HERMES_HOME points to its own dir (no honcho.json)
+        monkeypatch.setenv("HERMES_HOME", str(profile_hermes))
+        assert not (profile_hermes / "honcho.json").exists()
+
+        # Should find ~/.hermes/honcho.json, not fall through to global
+        cfg = _read_config()
+        assert cfg.get("apiKey") == "key"
+        assert "hermes.coder" in cfg.get("hosts", {})
+
+    def test_default_profile_skips_self(self, tmp_path, monkeypatch):
+        """Default profile doesn't double-read its own config."""
+        home = tmp_path / "home"
+        default_hermes = home / ".hermes"
+        default_hermes.mkdir(parents=True)
+
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        monkeypatch.setenv("HERMES_HOME", str(default_hermes))
+
+        # No honcho.json anywhere
+        import honcho_integration.client as _client_mod
+        import honcho_integration.cli as _cli_mod
+        global_cfg = home / ".honcho" / "config.json"
+        global_cfg.parent.mkdir(parents=True)
+        monkeypatch.setattr(_client_mod, "GLOBAL_CONFIG_PATH", global_cfg)
+        monkeypatch.setattr(_cli_mod, "GLOBAL_CONFIG_PATH", global_cfg)
+
+        cfg = _read_config()
+        assert cfg == {}
 
 
 class TestMultiProfileIsolation:
