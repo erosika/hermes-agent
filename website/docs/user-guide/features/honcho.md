@@ -352,6 +352,12 @@ hermes honcho tokens --dialectic N         # Set dialectic char cap
 hermes honcho identity                     # Show AI peer identity
 hermes honcho identity <file>              # Seed AI peer identity from file (SOUL.md, etc.)
 hermes honcho migrate                      # Migration guide: OpenClaw → Hermes + Honcho
+hermes honcho enable                       # Enable Honcho for the active profile
+hermes honcho disable                      # Disable Honcho for the active profile
+hermes honcho sync                         # Create host blocks for all profiles missing one
+hermes honcho status --all                 # Overview of Honcho config across all profiles
+hermes honcho peers                        # Peer identities across all profiles
+hermes honcho --target-profile NAME status # Inspect another profile's Honcho config
 ```
 
 ### Doctor Integration
@@ -398,6 +404,59 @@ Shows the current AI peer representation from Honcho.
 - **Expertise adaptation** — adjusts technical depth based on user's background
 - **Cross-platform memory** — same user understanding across CLI, Telegram, Discord, etc.
 - **Multi-user support** — each user (via messaging platforms) gets their own user model
+
+## Profiles
+
+Honcho is profile-aware. When you create a [profile](../profiles.md), Honcho automatically creates a host block with inherited settings. Each profile gets its own AI peer while sharing the user peer and workspace — so your user model carries across agents, but each agent develops its own identity.
+
+### What `profile create` does
+
+| Created | Value | Purpose |
+|---------|-------|---------|
+| Host key | `hermes.<profile>` | Scopes config to this profile |
+| AI peer | `<profile>` | Distinct identity in Honcho |
+| User peer | *(inherited)* | Same person across all agents |
+| Workspace | *(inherited)* | Shared user history |
+
+No per-profile `hermes honcho setup` required.
+
+### Cross-profile commands
+
+```bash
+hermes honcho status --all                    # table of all profiles
+hermes honcho peers                           # peer identities across profiles
+hermes honcho --target-profile coder status   # inspect without switching
+hermes honcho --target-profile coder disable  # disable for one profile
+hermes honcho sync                            # backfill profiles created before Honcho
+```
+
+`--target-profile` reads or modifies another profile's host block without switching context. Use `-p` to fully activate a profile:
+
+```bash
+hermes -p coder honcho status     # runs as the coder profile
+```
+
+### Config resolution
+
+Honcho config uses a three-tier lookup so profiles find host blocks regardless of where they were written:
+
+| Priority | Path | Purpose |
+|----------|------|---------|
+| 1 | `$HERMES_HOME/honcho.json` | Profile-local config |
+| 2 | `~/.hermes/honcho.json` | Default profile (where host blocks accumulate) |
+| 3 | `~/.honcho/config.json` | Global (shared with Cursor, SillyTavern, etc.) |
+
+Writes go to the active profile's local config. Reads check all three tiers. Host blocks created by `profile create` are written to tier 2 and are visible to all profiles automatically.
+
+### Syncing
+
+If you created profiles before configuring Honcho, or before upgrading to profile-aware Honcho:
+
+```bash
+hermes honcho sync
+```
+
+Creates missing host blocks for all existing profiles. Also runs automatically during `hermes update`.
 
 :::tip
 Honcho is fully opt-in — zero behavior change when disabled or unconfigured. All Honcho calls are non-fatal; if the service is unreachable, the agent continues normally.

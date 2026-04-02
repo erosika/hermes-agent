@@ -157,11 +157,9 @@ class HonchoSessionManager:
             logger.debug("Honcho session '%s' retrieved from cache", session_id)
             return self._sessions_cache[session_id], []
 
-        # Eagerly create the session on the server by passing metadata={}.
-        # Without this, session() is lazy and add_peers / context calls fail
-        # with "Session not found" for new AI peers that have never used this
-        # session before.
-        session = self.honcho.session(session_id, metadata={})
+        # honcho.session() makes a get-or-create API call on the server.
+        # This ensures the session exists before add_peers / context calls.
+        session = self.honcho.session(session_id)
 
         # Configure peer observation settings.
         # observe_me=True for AI peer so Honcho watches what the agent says

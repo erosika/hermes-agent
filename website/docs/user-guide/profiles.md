@@ -200,3 +200,9 @@ Add the line to your `~/.bashrc` or `~/.zshrc` for persistent completion. Comple
 Profiles use the `HERMES_HOME` environment variable. When you run `coder chat`, the wrapper script sets `HERMES_HOME=~/.hermes/profiles/coder` before launching hermes. Since 119+ files in the codebase resolve paths via `get_hermes_home()`, everything automatically scopes to the profile's directory — config, sessions, memory, skills, state database, gateway PID, logs, and cron jobs.
 
 The default profile is simply `~/.hermes` itself. No migration needed — existing installs work identically.
+
+## Honcho memory
+
+If [Honcho](../features/honcho.md) is configured, profiles are automatically memory-aware. Each profile gets its own AI peer while sharing your user identity and workspace. No per-profile setup required — `profile create` handles the wiring.
+
+See the [Profiles section in the Honcho docs](../features/honcho.md#profiles) for details on cross-profile commands, config resolution, and syncing.
