@@ -346,15 +346,18 @@ class TestResolveConfigPath:
     def test_falls_back_to_global_when_no_local(self, tmp_path):
         hermes_home = tmp_path / "hermes"
         hermes_home.mkdir()
-        # No honcho.json in HERMES_HOME
-
-        with patch.dict(os.environ, {"HERMES_HOME": str(hermes_home)}):
+        # No honcho.json in HERMES_HOME — and no ~/.hermes/honcho.json either
+        with patch.dict(os.environ, {"HERMES_HOME": str(hermes_home)}), \
+             patch.object(Path, "home", staticmethod(lambda: tmp_path)):
             result = resolve_config_path()
         assert result == GLOBAL_CONFIG_PATH
 
-    def test_falls_back_to_global_without_hermes_home_env(self):
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("HERMES_HOME", None)
+    def test_falls_back_to_global_without_hermes_home_env(self, tmp_path):
+        # Point HERMES_HOME to a temp dir that has NO honcho.json
+        empty_home = tmp_path / ".hermes"
+        empty_home.mkdir()
+        with patch.dict(os.environ, {"HERMES_HOME": str(empty_home)}, clear=False), \
+             patch.object(Path, "home", staticmethod(lambda: tmp_path)):
             result = resolve_config_path()
         assert result == GLOBAL_CONFIG_PATH
 
