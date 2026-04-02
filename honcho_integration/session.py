@@ -241,7 +241,7 @@ class HonchoSessionManager:
             chat_id = parts[1] if len(parts) > 1 else key
             user_peer_id = self._sanitize_id(f"user-{channel}-{chat_id}")
 
-        assistant_peer_id = (
+        assistant_peer_id = self._sanitize_id(
             self._config.ai_peer if self._config else "hermes-assistant"
         )
 
