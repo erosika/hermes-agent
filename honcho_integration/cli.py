@@ -422,7 +422,7 @@ def cmd_setup(args) -> None:
     try:
         from honcho_integration.client import HonchoClientConfig, get_honcho_client, reset_honcho_client
         reset_honcho_client()
-        hcfg = HonchoClientConfig.from_global_config()
+        hcfg = HonchoClientConfig.from_global_config(host=_host_key())
         get_honcho_client(hcfg)
         print("OK")
     except Exception as e:
@@ -517,7 +517,7 @@ def cmd_status(args) -> None:
 
     try:
         from honcho_integration.client import HonchoClientConfig, get_honcho_client
-        hcfg = HonchoClientConfig.from_global_config()
+        hcfg = HonchoClientConfig.from_global_config(host=_host_key())
     except Exception as e:
         print(f"  Config error: {e}\n")
         return
@@ -836,7 +836,7 @@ def cmd_identity(args) -> None:
     try:
         from honcho_integration.client import HonchoClientConfig, get_honcho_client
         from honcho_integration.session import HonchoSessionManager
-        hcfg = HonchoClientConfig.from_global_config()
+        hcfg = HonchoClientConfig.from_global_config(host=_host_key())
         client = get_honcho_client(hcfg)
         mgr = HonchoSessionManager(honcho=client, config=hcfg)
         session_key = hcfg.resolve_session_name()
