@@ -203,6 +203,6 @@ The default profile is simply `~/.hermes` itself. No migration needed — existi
 
 ## Honcho memory
 
-If [Honcho](../features/honcho.md) is configured, profiles are automatically memory-aware. Each profile gets its own AI peer while sharing your user identity and workspace. No per-profile setup required — `profile create` handles the wiring.
+If [Honcho](../features/honcho.md) is configured, profiles created with `--clone` or `--clone-all` are automatically memory-aware — each gets its own AI peer while sharing your user identity and workspace.
 
 See the [Profiles section in the Honcho docs](../features/honcho.md#profiles) for details on cross-profile commands, config resolution, and syncing.

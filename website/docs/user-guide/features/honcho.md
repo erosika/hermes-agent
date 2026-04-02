@@ -407,9 +407,13 @@ Shows the current AI peer representation from Honcho.
 
 ## Profiles
 
-Honcho is profile-aware. When you create a [profile](../profiles.md), Honcho automatically creates a host block with inherited settings. Each profile gets its own AI peer while sharing the user peer and workspace — so your user model carries across agents, but each agent develops its own identity.
+Honcho is profile-aware. When you create a [profile](../profiles.md) with `--clone` or `--clone-all`, Honcho automatically creates a host block with inherited settings. Each profile gets its own AI peer while sharing the user peer and workspace — so your user model carries across agents, but each agent develops its own identity.
 
-### What `profile create` does
+### What `profile create --clone` does
+
+```bash
+hermes profile create research --clone
+```
 
 | Created | Value | Purpose |
 |---------|-------|---------|
@@ -418,7 +422,9 @@ Honcho is profile-aware. When you create a [profile](../profiles.md), Honcho aut
 | User peer | *(inherited)* | Same person across all agents |
 | Workspace | *(inherited)* | Shared user history |
 
-No per-profile `hermes honcho setup` required.
+Bare `profile create` (without `--clone`) does not create a Honcho peer — run `hermes honcho setup` or `hermes honcho enable` from that profile to configure it later.
+
+No per-profile `hermes honcho setup` required when using `--clone`.
 
 ### Cross-profile commands
 
