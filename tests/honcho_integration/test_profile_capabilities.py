@@ -213,7 +213,7 @@ class TestCmdEnable:
         assert block["memoryMode"] == "honcho"
         assert block["recallMode"] == "tools"
         assert block["peerName"] == "alice"
-        assert block["aiPeer"] == "hermes.writer"
+        assert block["aiPeer"] == "writer"
         assert block["workspace"] == "shared"
 
 
@@ -397,7 +397,7 @@ class TestTargetProfile:
         cfg = _read_cfg(honcho_env["config_file"])
         assert "hermes.dreamer" in cfg["hosts"]
         assert cfg["hosts"]["hermes.dreamer"]["enabled"] is True
-        assert cfg["hosts"]["hermes.dreamer"]["aiPeer"] == "hermes.dreamer"
+        assert cfg["hosts"]["hermes.dreamer"]["aiPeer"] == "dreamer"
 
         mod._profile_override = None
 
@@ -685,7 +685,7 @@ class TestEnableDisableCycle:
         cmd_enable(SimpleNamespace())
         cfg = _read_cfg(honcho_env["config_file"])
         assert cfg["hosts"]["hermes.tester"]["enabled"] is True
-        assert cfg["hosts"]["hermes.tester"]["aiPeer"] == "hermes.tester"
+        assert cfg["hosts"]["hermes.tester"]["aiPeer"] == "tester"
         assert cfg["hosts"]["hermes.tester"]["memoryMode"] == "hybrid"
 
         # Disable
