@@ -85,6 +85,15 @@ def _normalize_recall_mode(val: str) -> str:
     return val if val in _VALID_RECALL_MODES else "hybrid"
 
 
+def _resolve_bool(host_val, root_val, *, default: bool) -> bool:
+    """Resolve a bool config field: host wins, then root, then default."""
+    if host_val is not None:
+        return bool(host_val)
+    if root_val is not None:
+        return bool(root_val)
+    return default
+
+
 _VALID_OBSERVATION_MODES = {"unified", "directional"}
 _OBSERVATION_MODE_ALIASES = {"shared": "unified", "separate": "directional", "cross": "directional"}
 
@@ -197,8 +206,11 @@ class HonchoClientConfig:
     context_tokens: int | None = None
     # Dialectic (peer.chat) settings
     # reasoning_level: "minimal" | "low" | "medium" | "high" | "max"
-    # Used as the default; prefetch_dialectic may bump it dynamically.
     dialectic_reasoning_level: str = "low"
+    # dynamic: auto-bump reasoning level based on query length
+    #   true  — low->medium (120+ chars), low->high (400+ chars), capped at "high"
+    #   false — always use dialecticReasoningLevel as-is
+    dialectic_dynamic: bool = True
     # Max chars of dialectic result to inject into Hermes system prompt
     dialectic_max_chars: int = 600
     # Honcho API limits — configurable for self-hosted instances
@@ -369,6 +381,11 @@ class HonchoClientConfig:
                 host_block.get("dialecticReasoningLevel")
                 or raw.get("dialecticReasoningLevel")
                 or "low"
+            ),
+            dialectic_dynamic=_resolve_bool(
+                host_block.get("dialecticDynamic"),
+                raw.get("dialecticDynamic"),
+                default=True,
             ),
             dialectic_max_chars=int(
                 host_block.get("dialecticMaxChars")

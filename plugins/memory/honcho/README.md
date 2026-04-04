@@ -111,7 +111,8 @@ Presets for `observationMode`:
 | Key | Type | Default | Scope | Description |
 |-----|------|---------|-------|-------------|
 | `contextTokens` | int | SDK default | root / host | Token budget for `context()` API calls. Also gates prefetch truncation (tokens x 4 chars) |
-| `dialecticReasoningLevel` | string | `"low"` | root / host | Default reasoning level for `peer.chat()`: `"minimal"`, `"low"`, `"medium"`, `"high"`, `"max"`. Auto-bumped for longer queries (120+ chars: +1 level, 400+ chars: +2 levels, capped at `"high"`) |
+| `dialecticReasoningLevel` | string | `"low"` | root / host | Base reasoning level for `peer.chat()`: `"minimal"`, `"low"`, `"medium"`, `"high"`, `"max"` |
+| `dialecticDynamic` | bool | `true` | root / host | Auto-bump reasoning based on query length: `<120` chars = base level, `120-400` = +1, `>400` = +2 (capped at `"high"`). Set `false` to always use `dialecticReasoningLevel` as-is |
 | `dialecticMaxChars` | int | `600` | root / host | Max chars of dialectic result injected into system prompt |
 | `dialecticMaxInputChars` | int | `10000` | root / host | Max chars for dialectic query input to `peer.chat()`. Honcho cloud limit: 10k |
 | `messageMaxChars` | int | `25000` | root / host | Max chars per message sent via `add_messages()`. Messages exceeding this are chunked with `[continued]` markers. Honcho cloud limit: 25k |

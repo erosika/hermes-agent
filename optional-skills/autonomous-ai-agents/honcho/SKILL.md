@@ -192,6 +192,7 @@ Config file: `$HERMES_HOME/honcho.json` (profile-local) or `~/.honcho/config.jso
 | `writeFrequency` | `async` | `async`, `turn`, `session`, or integer N |
 | `sessionStrategy` | `per-directory` | `per-directory`, `per-repo`, `per-session`, `global` |
 | `dialecticReasoningLevel` | `low` | `minimal`, `low`, `medium`, `high`, `max` |
+| `dialecticDynamic` | `true` | Auto-bump reasoning by query length. `false` = fixed level |
 | `messageMaxChars` | `25000` | Max chars per message (chunked if exceeded) |
 | `dialecticMaxInputChars` | `10000` | Max chars for dialectic query input |
 

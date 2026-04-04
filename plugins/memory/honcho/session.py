@@ -107,6 +107,9 @@ class HonchoSessionManager:
         self._dialectic_reasoning_level: str = (
             config.dialectic_reasoning_level if config else "low"
         )
+        self._dialectic_dynamic: bool = (
+            config.dialectic_dynamic if config else True
+        )
         self._dialectic_max_chars: int = (
             config.dialectic_max_chars if config else 600
         )
@@ -483,17 +486,22 @@ class HonchoSessionManager:
 
     def _dynamic_reasoning_level(self, query: str) -> str:
         """
-        Pick a reasoning level based on message complexity.
+        Pick a reasoning level for a dialectic query.
 
-        Uses the configured default as a floor; bumps up for longer or
-        more complex messages so Honcho applies more inference where it matters.
+        When dialecticDynamic is true (default), auto-bumps based on query
+        length so Honcho applies more inference where it matters:
 
-          < 120 chars  → default (typically "low")
-          120–400 chars → one level above default (cap at "high")
-          > 400 chars  → two levels above default (cap at "high")
+          < 120 chars  -> configured default (typically "low")
+          120-400 chars -> +1 level above default (cap at "high")
+          > 400 chars  -> +2 levels above default (cap at "high")
 
-        "max" is never selected automatically — reserve it for explicit config.
+        "max" is never selected automatically -- reserve it for explicit config.
+
+        When dialecticDynamic is false, always returns the configured level.
         """
+        if not self._dialectic_dynamic:
+            return self._dialectic_reasoning_level
+
         levels = self._REASONING_LEVELS
         default_idx = levels.index(self._dialectic_reasoning_level) if self._dialectic_reasoning_level in levels else 1
         n = len(query)
