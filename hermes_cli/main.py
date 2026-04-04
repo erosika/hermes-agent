@@ -4822,11 +4822,8 @@ For more help on a command:
     def cmd_honcho(args):
         sub = getattr(args, "honcho_command", None)
         if sub == "setup":
-            # Redirect to the generic memory setup
-            print("\n  Honcho is now configured via the memory provider system.")
-            print("  Running 'hermes memory setup'...\n")
-            from hermes_cli.memory_setup import memory_command
-            memory_command(args)
+            from hermes_cli.memory_setup import cmd_setup_provider
+            cmd_setup_provider("honcho")
             return
         from plugins.memory.honcho.cli import honcho_command
         honcho_command(args)
