@@ -529,24 +529,23 @@ class HonchoMemoryProvider(MemoryProvider):
         remaining = content
         first = True
         while remaining:
-            budget = limit if first else limit - prefix_len
-            if len(remaining) <= budget:
+            effective = limit if first else limit - prefix_len
+            if len(remaining) <= effective:
                 chunks.append(remaining if first else prefix + remaining)
                 break
 
-            effective_limit = limit if first else limit - prefix_len
-            segment = remaining[:effective_limit]
+            segment = remaining[:effective]
 
             # Try paragraph break, then sentence, then word
             cut = segment.rfind("\n\n")
-            if cut < effective_limit * 0.3:
+            if cut < effective * 0.3:
                 cut = segment.rfind(". ")
                 if cut >= 0:
                     cut += 2  # include the period and space
-            if cut < effective_limit * 0.3:
+            if cut < effective * 0.3:
                 cut = segment.rfind(" ")
-            if cut < effective_limit * 0.3:
-                cut = effective_limit  # hard cut
+            if cut < effective * 0.3:
+                cut = effective  # hard cut
 
             chunk = remaining[:cut].rstrip()
             remaining = remaining[cut:].lstrip()

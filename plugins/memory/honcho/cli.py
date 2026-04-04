@@ -451,8 +451,6 @@ def cmd_setup(args) -> None:
     if new_strat in ("per-session", "per-repo", "per-directory", "global"):
         hermes_host["sessionStrategy"] = new_strat
 
-    # Memory mode is always hybrid (built-in + Honcho run together)
-    hermes_host["memoryMode"] = "hybrid"
     hermes_host["enabled"] = True
     hermes_host.setdefault("saveMessages", True)
 
@@ -594,11 +592,7 @@ def cmd_status(args) -> None:
     print(f"  User peer:      {hcfg.peer_name or 'not set'}")
     print(f"  Session key:    {hcfg.resolve_session_name()}")
     print(f"  Recall mode:    {hcfg.recall_mode}")
-    print(f"  Memory mode:    {hcfg.memory_mode}")
-    if hcfg.peer_memory_modes:
-        print("  Per-peer modes:")
-        for peer, mode in hcfg.peer_memory_modes.items():
-            print(f"    {peer}: {mode}")
+    print(f"  Observation:    user(me={hcfg.user_observe_me},others={hcfg.user_observe_others}) ai(me={hcfg.ai_observe_me},others={hcfg.ai_observe_others})")
     print(f"  Write freq:     {hcfg.write_frequency}")
 
     if hcfg.enabled and (hcfg.api_key or hcfg.base_url):
@@ -659,24 +653,22 @@ def _cmd_status_all() -> None:
     cfg = _read_config()
     active = _active_profile_name()
 
-    print(f"\nHoncho profiles ({len(rows)})\n" + "─" * 60)
-    print(f"  {'Profile':<14} {'Host':<22} {'Enabled':<9} {'Mode':<9} {'Recall':<9} {'Write'}")
-    print(f"  {'─' * 14} {'─' * 22} {'─' * 9} {'─' * 9} {'─' * 9} {'─' * 9}")
+    print(f"\nHoncho profiles ({len(rows)})\n" + "─" * 55)
+    print(f"  {'Profile':<14} {'Host':<22} {'Enabled':<9} {'Recall':<9} {'Write'}")
+    print(f"  {'─' * 14} {'─' * 22} {'─' * 9} {'─' * 9} {'─' * 9}")
 
     for name, host, block in rows:
         enabled = block.get("enabled", cfg.get("enabled"))
         if enabled is None:
-            # Auto-enable check: any credentials?
             has_creds = bool(cfg.get("apiKey") or os.environ.get("HONCHO_API_KEY"))
             enabled = has_creds if block else False
         enabled_str = "yes" if enabled else "no"
 
-        mode = block.get("memoryMode") or cfg.get("memoryMode", "hybrid")
         recall = block.get("recallMode") or cfg.get("recallMode", "hybrid")
         write = block.get("writeFrequency") or cfg.get("writeFrequency", "async")
 
         marker = " *" if name == active else ""
-        print(f"  {name + marker:<14} {host:<22} {enabled_str:<9} {mode:<9} {recall:<9} {write}")
+        print(f"  {name + marker:<14} {host:<22} {enabled_str:<9} {recall:<9} {write}")
 
     print(f"\n  * active profile\n")
 
@@ -799,25 +791,26 @@ def cmd_peer(args) -> None:
 
 
 def cmd_mode(args) -> None:
-    """Show or set the memory mode."""
+    """Show or set the recall mode."""
     MODES = {
-        "hybrid": "write to both Honcho and local MEMORY.md (default)",
-        "honcho": "Honcho only — MEMORY.md writes disabled",
+        "hybrid": "auto-injected context + Honcho tools available (default)",
+        "context": "auto-injected context only, Honcho tools hidden",
+        "tools": "Honcho tools only, no auto-injected context",
     }
     cfg = _read_config()
     mode_arg = getattr(args, "mode", None)
 
     if mode_arg is None:
         current = (
-            (cfg.get("hosts") or {}).get(_host_key(), {}).get("memoryMode")
-            or cfg.get("memoryMode")
+            (cfg.get("hosts") or {}).get(_host_key(), {}).get("recallMode")
+            or cfg.get("recallMode")
             or "hybrid"
         )
-        print("\nHoncho memory mode\n" + "─" * 40)
+        print("\nHoncho recall mode\n" + "─" * 40)
         for m, desc in MODES.items():
-            marker = " ←" if m == current else ""
-            print(f"  {m:<8}  {desc}{marker}")
-        print("\n  Set with: hermes honcho mode [hybrid|honcho]\n")
+            marker = " <-" if m == current else ""
+            print(f"  {m:<10}  {desc}{marker}")
+        print(f"\n  Set with: hermes honcho mode [hybrid|context|tools]\n")
         return
 
     if mode_arg not in MODES:
@@ -826,9 +819,9 @@ def cmd_mode(args) -> None:
 
     host = _host_key()
     label = f"[{host}] " if host != "hermes" else ""
-    cfg.setdefault("hosts", {}).setdefault(host, {})["memoryMode"] = mode_arg
+    cfg.setdefault("hosts", {}).setdefault(host, {})["recallMode"] = mode_arg
     _write_config(cfg)
-    print(f"  {label}Memory mode -> {mode_arg}  ({MODES[mode_arg]})\n")
+    print(f"  {label}Recall mode -> {mode_arg}  ({MODES[mode_arg]})\n")
 
 
 def cmd_tokens(args) -> None:

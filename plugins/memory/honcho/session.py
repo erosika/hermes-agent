@@ -86,7 +86,7 @@ class HonchoSessionManager:
             honcho: Optional Honcho client. If not provided, uses the singleton.
             context_tokens: Max tokens for context() calls (None = Honcho default).
             config: HonchoClientConfig from global config (provides peer_name, ai_peer,
-                    write_frequency, memory_mode, etc.).
+                    write_frequency, observation, etc.).
         """
         self._honcho = honcho
         self._context_tokens = context_tokens
@@ -193,6 +193,8 @@ class HonchoSessionManager:
 
             # Sync back: server-side config (set via Honcho UI) wins over
             # local defaults. Read the effective config after add_peers.
+            # Note: observation booleans are manager-scoped, not per-session.
+            # Last session init wins. Fine for CLI; gateway should scope per-session.
             try:
                 server_user = session.get_peer_configuration(user_peer)
                 server_ai = session.get_peer_configuration(assistant_peer)
