@@ -60,21 +60,102 @@ hermes memory setup        # select "honcho"
 
 **Config:** `$HERMES_HOME/honcho.json` — see the [config reference](https://github.com/hermes-ai/hermes-agent/blob/main/plugins/memory/honcho/README.md) and the [Honcho integration guide](https://docs.honcho.dev/v3/guides/integrations/hermes).
 
+<details>
+<summary>Key config options</summary>
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `apiKey` | -- | API key from [app.honcho.dev](https://app.honcho.dev) |
+| `baseUrl` | -- | Base URL for self-hosted Honcho |
+| `peerName` | -- | User peer identity |
+| `aiPeer` | host key | AI peer identity (one per profile) |
+| `workspace` | host key | Shared workspace ID |
+| `recallMode` | `hybrid` | `hybrid` (auto-inject + tools), `context` (inject only), `tools` (tools only) |
+| `observation` | all on | Per-peer `observeMe`/`observeOthers` booleans |
+| `writeFrequency` | `async` | `async`, `turn`, `session`, or integer N |
+| `sessionStrategy` | `per-directory` | `per-directory`, `per-repo`, `per-session`, `global` |
+| `dialecticReasoningLevel` | `low` | `minimal`, `low`, `medium`, `high`, `max` |
+| `dialecticDynamic` | `true` | Auto-bump reasoning by query length |
+| `messageMaxChars` | `25000` | Max chars per message (chunked if exceeded) |
+
+</details>
+
 :::tip Migrating from `hermes honcho`
 If you previously used `hermes honcho setup`, your config and all server-side data are intact. Just re-enable through the setup wizard again or manually set `memory.provider: honcho` to reactivate via the new system.
 :::
 
 **Multi-agent / Profiles:**
 
-Each Hermes profile gets its own Honcho peer identity while sharing the same workspace (user context, sessions, project history). When creating a profile with `--clone`, Honcho config is auto-cloned:
+Each Hermes profile gets its own Honcho AI peer while sharing the same workspace -- all profiles see the same user representation, but each agent builds its own identity and observations.
 
 ```bash
-hermes profile create coder --clone   # creates honcho peer "coder", inherits config
-hermes honcho sync                    # backfill host blocks for all existing profiles
+hermes profile create coder --clone   # creates honcho peer "coder", inherits config from default
 ```
 
-See [Honcho integration guide](https://docs.honcho.dev/v3/guides/integrations/hermes) for the full config reference.
+What `--clone` does: creates a `hermes.coder` host block in `honcho.json` with `aiPeer: "coder"`, shared `workspace`, inherited `peerName`, `recallMode`, `writeFrequency`, `observation`, etc. The peer is eagerly created in Honcho so it exists before first message.
 
+For profiles created before Honcho was set up:
+
+```bash
+hermes honcho sync   # scans all profiles, creates host blocks for any missing ones
+```
+
+This inherits settings from the default `hermes` host block and creates new AI peers for each profile. Idempotent -- skips profiles that already have a host block.
+
+<details>
+<summary>Full honcho.json example (multi-profile)</summary>
+
+```json
+{
+  "apiKey": "your-key",
+  "workspace": "hermes",
+  "peerName": "eri",
+  "hosts": {
+    "hermes": {
+      "enabled": true,
+      "aiPeer": "hermes",
+      "workspace": "hermes",
+      "peerName": "eri",
+      "recallMode": "hybrid",
+      "writeFrequency": "async",
+      "sessionStrategy": "per-directory",
+      "observation": {
+        "user": { "observeMe": true, "observeOthers": true },
+        "ai": { "observeMe": true, "observeOthers": true }
+      },
+      "dialecticReasoningLevel": "low",
+      "dialecticDynamic": true,
+      "dialecticMaxChars": 600,
+      "messageMaxChars": 25000,
+      "saveMessages": true
+    },
+    "hermes.coder": {
+      "enabled": true,
+      "aiPeer": "coder",
+      "workspace": "hermes",
+      "peerName": "eri",
+      "recallMode": "tools",
+      "observation": {
+        "user": { "observeMe": true, "observeOthers": false },
+        "ai": { "observeMe": true, "observeOthers": true }
+      }
+    },
+    "hermes.writer": {
+      "enabled": true,
+      "aiPeer": "writer",
+      "workspace": "hermes",
+      "peerName": "eri"
+    }
+  },
+  "sessions": {
+    "/home/user/myproject": "myproject-main"
+  }
+}
+```
+
+</details>
+
+See the [config reference](https://github.com/hermes-ai/hermes-agent/blob/main/plugins/memory/honcho/README.md) and [Honcho integration guide](https://docs.honcho.dev/v3/guides/integrations/hermes).
 
 
 ---

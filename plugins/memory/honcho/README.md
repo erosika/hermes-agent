@@ -58,20 +58,18 @@ Tool availability depends on `recallMode`: hidden in `context` mode, always pres
 | `workspace` | string | host key | root / host | Honcho workspace ID |
 | `peerName` | string | -- | root / host | User peer identity |
 | `aiPeer` | string | host key | root / host | AI peer identity |
-| `linkedHosts` | array | `[]` | host only | Host keys to link for cross-workspace observation |
 
 ### Memory & Recall
 
 | Key | Type | Default | Scope | Description |
 |-----|------|---------|-------|-------------|
-| `memoryMode` | string or object | `"hybrid"` | root / host | `"hybrid"` (Honcho + built-in) or per-peer object: `{"default": "hybrid", "hermes": "honcho"}` |
 | `recallMode` | string | `"hybrid"` | root / host | `"hybrid"` (auto-inject + tools), `"context"` (auto-inject only, tools hidden), `"tools"` (tools only, no injection). Legacy `"auto"` normalizes to `"hybrid"` |
 | `observationMode` | string | `"directional"` | root / host | Shorthand preset: `"directional"` (all on) or `"unified"` (shared pool). Use `observation` object for granular control |
 | `observation` | object | -- | root / host | Per-peer observation config (see below) |
 
 #### Observation (granular)
 
-Maps 1:1 to Honcho's per-peer `SessionPeerConfig`. When present, overrides `observationMode` preset.
+Maps 1:1 to Honcho's per-peer `SessionPeerConfig`. Set at root or per host block -- each profile can have different observation settings. When present, overrides `observationMode` preset.
 
 ```json
 "observation": {
@@ -90,6 +88,21 @@ Maps 1:1 to Honcho's per-peer `SessionPeerConfig`. When present, overrides `obse
 Presets for `observationMode`:
 - `"directional"` (default): all four booleans `true`
 - `"unified"`: user `observeMe=true`, AI `observeOthers=true`, rest `false`
+
+Per-profile example -- coder profile observes the user but user doesn't observe coder:
+
+```json
+"hosts": {
+  "hermes.coder": {
+    "observation": {
+      "user": { "observeMe": true, "observeOthers": false },
+      "ai":   { "observeMe": true, "observeOthers": true }
+    }
+  }
+}
+```
+
+Settings changed in the [Honcho dashboard](https://app.honcho.dev) are synced back on session init.
 
 ### Write Behavior
 
@@ -178,7 +191,6 @@ Host key derivation: `HERMES_HONCHO_HOST` env > active profile (`hermes.<profile
       "aiPeer": "hermes",
       "workspace": "hermes",
       "peerName": "eri",
-      "memoryMode": "hybrid",
       "recallMode": "hybrid",
       "observation": {
         "user": { "observeMe": true, "observeOthers": true },

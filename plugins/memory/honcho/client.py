@@ -146,28 +146,7 @@ def _resolve_observation(
     }
 
 
-def _resolve_memory_mode(
-    global_val: str | dict,
-    host_val: str | dict | None,
-) -> dict:
-    """Parse memoryMode (string or object) into memory_mode + peer_memory_modes.
 
-    Resolution order: host-level wins over global.
-    String form:  applies as the default for all peers.
-    Object form:  { "default": "hybrid", "hermes": "honcho", ... }
-                  "default" key sets the fallback; other keys are per-peer overrides.
-    """
-    # Pick the winning value (host beats global)
-    val = host_val if host_val is not None else global_val
-
-    if isinstance(val, dict):
-        default = val.get("default", "hybrid")
-        overrides = {k: v for k, v in val.items() if k != "default"}
-    else:
-        default = str(val) if val else "hybrid"
-        overrides = {}
-
-    return {"memory_mode": default, "peer_memory_modes": overrides}
 
 
 @dataclass
@@ -183,22 +162,9 @@ class HonchoClientConfig:
     # Identity
     peer_name: str | None = None
     ai_peer: str = "hermes"
-    linked_hosts: list[str] = field(default_factory=list)
     # Toggles
     enabled: bool = False
     save_messages: bool = True
-    # memoryMode: default for all peers. "hybrid" / "honcho"
-    memory_mode: str = "hybrid"
-    # Per-peer overrides — any named Honcho peer. Override memory_mode when set.
-    # Config object form: "memoryMode": { "default": "hybrid", "hermes": "honcho" }
-    peer_memory_modes: dict[str, str] = field(default_factory=dict)
-
-    def peer_memory_mode(self, peer_name: str) -> str:
-        """Return the effective memory mode for a named peer.
-
-        Resolution: per-peer override → global memory_mode default.
-        """
-        return self.peer_memory_modes.get(peer_name, self.memory_mode)
     # Write frequency: "async" (background thread), "turn" (sync per turn),
     # "session" (flush on session end), or int (every N turns)
     write_frequency: str | int = "async"
@@ -302,8 +268,6 @@ class HonchoClientConfig:
             or raw.get("aiPeer")
             or resolved_host
         )
-        linked_hosts = host_block.get("linkedHosts", [])
-
         api_key = (
             host_block.get("apiKey")
             or raw.get("apiKey")
@@ -368,13 +332,8 @@ class HonchoClientConfig:
             base_url=base_url,
             peer_name=host_block.get("peerName") or raw.get("peerName"),
             ai_peer=ai_peer,
-            linked_hosts=linked_hosts,
             enabled=enabled,
             save_messages=save_messages,
-            **_resolve_memory_mode(
-                raw.get("memoryMode", "hybrid"),
-                host_block.get("memoryMode"),
-            ),
             write_frequency=write_frequency,
             context_tokens=host_block.get("contextTokens") or raw.get("contextTokens"),
             dialectic_reasoning_level=(
@@ -499,17 +458,6 @@ class HonchoClientConfig:
 
         # global: single session across all directories
         return self.workspace_id
-
-    def get_linked_workspaces(self) -> list[str]:
-        """Resolve linked host keys to workspace names."""
-        hosts = self.raw.get("hosts", {})
-        workspaces = []
-        for host_key in self.linked_hosts:
-            block = hosts.get(host_key, {})
-            ws = block.get("workspace") or host_key
-            if ws != self.workspace_id:
-                workspaces.append(ws)
-        return workspaces
 
 
 _honcho_client: Honcho | None = None

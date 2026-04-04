@@ -144,10 +144,6 @@ class HonchoMemoryProvider(MemoryProvider):
         self._last_context_turn = -999
         self._last_dialectic_turn = -999
 
-        # B2: peer_memory_mode gating (stub)
-        self._suppress_memory = False
-        self._suppress_user_profile = False
-
         # Port #1957: lazy session init for tools-only mode
         self._session_initialized = False
         self._lazy_init_kwargs: Optional[dict] = None
@@ -243,18 +239,6 @@ class HonchoMemoryProvider(MemoryProvider):
             # SOUL.md is persona content, not identity config. aiPeer should
             # only come from honcho.json (host block or root) or the default.
             # See scratch/memory-plugin-ux-specs.md #10 for rationale.
-
-            # ----- B2: peer_memory_mode gating (stub) -----
-            try:
-                ai_mode = cfg.peer_memory_mode(cfg.ai_peer)
-                user_mode = cfg.peer_memory_mode(cfg.peer_name or "user")
-                # "honcho" means Honcho owns memory; suppress built-in
-                self._suppress_memory = (ai_mode == "honcho")
-                self._suppress_user_profile = (user_mode == "honcho")
-                logger.debug("Honcho peer_memory_mode: ai=%s (suppress_memory=%s), user=%s (suppress_user_profile=%s)",
-                             ai_mode, self._suppress_memory, user_mode, self._suppress_user_profile)
-            except Exception as e:
-                logger.debug("Honcho peer_memory_mode check failed: %s", e)
 
             # ----- Port #1957: lazy session init for tools-only mode -----
             if self._recall_mode == "tools":

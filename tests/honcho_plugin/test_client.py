@@ -30,7 +30,6 @@ class TestHonchoClientConfigDefaults:
         assert config.session_strategy == "per-directory"
         assert config.recall_mode == "hybrid"
         assert config.session_peer_prefix is False
-        assert config.linked_hosts == []
         assert config.sessions == {}
 
 
@@ -106,7 +105,6 @@ class TestFromGlobalConfig:
                 "hermes": {
                     "workspace": "override-ws",
                     "aiPeer": "override-ai",
-                    "linkedHosts": ["cursor"],
                 }
             }
         }))
@@ -116,7 +114,6 @@ class TestFromGlobalConfig:
         # Host block workspace overrides root workspace
         assert config.workspace_id == "override-ws"
         assert config.ai_peer == "override-ai"
-        assert config.linked_hosts == ["cursor"]
         assert config.environment == "staging"
         assert config.peer_name == "alice"
         assert config.enabled is True
@@ -295,41 +292,6 @@ class TestResolveSessionName:
         )
         result = config.resolve_session_name("/home/user/proj")
         assert result == "custom-session"
-
-
-class TestGetLinkedWorkspaces:
-    def test_resolves_linked_hosts(self):
-        config = HonchoClientConfig(
-            workspace_id="hermes-ws",
-            linked_hosts=["cursor", "windsurf"],
-            raw={
-                "hosts": {
-                    "cursor": {"workspace": "cursor-ws"},
-                    "windsurf": {"workspace": "windsurf-ws"},
-                }
-            },
-        )
-        workspaces = config.get_linked_workspaces()
-        assert "cursor-ws" in workspaces
-        assert "windsurf-ws" in workspaces
-
-    def test_excludes_own_workspace(self):
-        config = HonchoClientConfig(
-            workspace_id="hermes-ws",
-            linked_hosts=["other"],
-            raw={"hosts": {"other": {"workspace": "hermes-ws"}}},
-        )
-        workspaces = config.get_linked_workspaces()
-        assert workspaces == []
-
-    def test_uses_host_key_as_fallback(self):
-        config = HonchoClientConfig(
-            workspace_id="hermes-ws",
-            linked_hosts=["cursor"],
-            raw={"hosts": {"cursor": {}}},  # no workspace field
-        )
-        workspaces = config.get_linked_workspaces()
-        assert "cursor" in workspaces
 
 
 class TestResolveConfigPath:

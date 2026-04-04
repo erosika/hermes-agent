@@ -41,9 +41,10 @@ def clone_honcho_for_profile(profile_name: str) -> bool:
 
     # Clone settings from default block, override identity fields
     new_block = {}
-    for key in ("memoryMode", "recallMode", "writeFrequency", "sessionStrategy",
+    for key in ("recallMode", "writeFrequency", "sessionStrategy",
                 "sessionPeerPrefix", "contextTokens", "dialecticReasoningLevel",
-                "dialecticMaxChars", "saveMessages"):
+                "dialecticDynamic", "dialecticMaxChars", "messageMaxChars",
+                "dialecticMaxInputChars", "saveMessages", "observation"):
         val = default_block.get(key)
         if val is not None:
             new_block[key] = val
@@ -106,8 +107,10 @@ def cmd_enable(args) -> None:
     # If this is a new profile host block with no settings, clone from default
     if not block.get("aiPeer"):
         default_block = cfg.get("hosts", {}).get(HOST, {})
-        for key in ("memoryMode", "recallMode", "writeFrequency", "sessionStrategy",
-                    "contextTokens", "dialecticReasoningLevel", "dialecticMaxChars"):
+        for key in ("recallMode", "writeFrequency", "sessionStrategy",
+                    "contextTokens", "dialecticReasoningLevel", "dialecticDynamic",
+                    "dialecticMaxChars", "messageMaxChars", "dialecticMaxInputChars",
+                    "saveMessages", "observation"):
             val = default_block.get(key)
             if val is not None and key not in block:
                 block[key] = val
