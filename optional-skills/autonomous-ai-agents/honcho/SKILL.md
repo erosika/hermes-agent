@@ -223,13 +223,21 @@ Messages over `messageMaxChars` (default 25k) are automatically chunked with `[c
 
 ## CLI Commands
 
-```
-hermes honcho setup          # full interactive wizard
-hermes honcho status         # show resolved config
-hermes honcho enable/disable # toggle for active profile
-hermes honcho peer           # update peer names
-hermes honcho tokens         # tune context/dialectic budgets
-hermes honcho map <name>     # map cwd to session name
-hermes honcho sync           # create host blocks for all profiles
-hermes honcho mode           # change recall/observation mode
-```
+| Command | Description |
+|---------|-------------|
+| `hermes honcho setup` | Interactive setup wizard (cloud/local, identity, observation, recall, sessions) |
+| `hermes honcho status` | Show resolved config, connection test, peer info for active profile |
+| `hermes honcho enable` | Enable Honcho for the active profile (creates host block if needed) |
+| `hermes honcho disable` | Disable Honcho for the active profile |
+| `hermes honcho peer` | Show or update peer names (`--user <name>`, `--ai <name>`, `--reasoning <level>`) |
+| `hermes honcho peers` | Show peer identities across all profiles |
+| `hermes honcho mode` | Show or set recall mode (`hybrid`, `context`, `tools`) |
+| `hermes honcho tokens` | Show or set token budgets (`--context <N>`, `--dialectic <N>`) |
+| `hermes honcho sessions` | List known directory-to-session-name mappings |
+| `hermes honcho map <name>` | Map current working directory to a Honcho session name |
+| `hermes honcho identity` | Seed AI peer identity or show both peer representations |
+| `hermes honcho sync` | Create host blocks for all Hermes profiles that don't have one yet |
+| `hermes honcho migrate` | Step-by-step migration guide from OpenClaw native memory to Hermes + Honcho |
+| `hermes memory setup` | Generic memory provider picker (selecting "honcho" runs the same wizard) |
+| `hermes memory status` | Show active memory provider and config |
+| `hermes memory off` | Disable external memory provider |
