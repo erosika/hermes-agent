@@ -346,14 +346,22 @@ class TestResolveConfigPath:
     def test_falls_back_to_global_when_no_local(self, tmp_path):
         hermes_home = tmp_path / "hermes"
         hermes_home.mkdir()
-        # No honcho.json in HERMES_HOME
+        # No honcho.json in HERMES_HOME — also isolate ~/.hermes so
+        # the default-profile fallback doesn't hit the real filesystem.
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
 
-        with patch.dict(os.environ, {"HERMES_HOME": str(hermes_home)}):
+        with patch.dict(os.environ, {"HERMES_HOME": str(hermes_home)}), \
+             patch.object(Path, "home", return_value=fake_home):
             result = resolve_config_path()
         assert result == GLOBAL_CONFIG_PATH
 
-    def test_falls_back_to_global_without_hermes_home_env(self):
-        with patch.dict(os.environ, {}, clear=False):
+    def test_falls_back_to_global_without_hermes_home_env(self, tmp_path):
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+
+        with patch.dict(os.environ, {}, clear=False), \
+             patch.object(Path, "home", return_value=fake_home):
             os.environ.pop("HERMES_HOME", None)
             result = resolve_config_path()
         assert result == GLOBAL_CONFIG_PATH

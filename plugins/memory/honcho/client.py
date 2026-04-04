@@ -92,7 +92,49 @@ _OBSERVATION_MODE_ALIASES = {"shared": "unified", "separate": "directional", "cr
 def _normalize_observation_mode(val: str) -> str:
     """Normalize observation mode values."""
     val = _OBSERVATION_MODE_ALIASES.get(val, val)
-    return val if val in _VALID_OBSERVATION_MODES else "unified"
+    return val if val in _VALID_OBSERVATION_MODES else "directional"
+
+
+# Observation presets — granular booleans derived from legacy string mode.
+# Explicit per-peer config always wins over presets.
+_OBSERVATION_PRESETS = {
+    "directional": {
+        "user_observe_me": True, "user_observe_others": True,
+        "ai_observe_me": True, "ai_observe_others": True,
+    },
+    "unified": {
+        "user_observe_me": True, "user_observe_others": False,
+        "ai_observe_me": False, "ai_observe_others": True,
+    },
+}
+
+
+def _resolve_observation(
+    mode: str,
+    observation_obj: dict | None,
+) -> dict:
+    """Resolve per-peer observation booleans.
+
+    Config forms:
+      String shorthand:  ``"observationMode": "directional"``
+      Granular object:   ``"observation": {"user": {"observeMe": true, "observeOthers": true},
+                                           "ai": {"observeMe": true, "observeOthers": false}}``
+
+    Granular fields override preset defaults.
+    """
+    preset = _OBSERVATION_PRESETS.get(mode, _OBSERVATION_PRESETS["directional"])
+    if not observation_obj or not isinstance(observation_obj, dict):
+        return dict(preset)
+
+    user_block = observation_obj.get("user") or {}
+    ai_block = observation_obj.get("ai") or {}
+
+    return {
+        "user_observe_me": user_block.get("observeMe", preset["user_observe_me"]),
+        "user_observe_others": user_block.get("observeOthers", preset["user_observe_others"]),
+        "ai_observe_me": ai_block.get("observeMe", preset["ai_observe_me"]),
+        "ai_observe_others": ai_block.get("observeOthers", preset["ai_observe_others"]),
+    }
 
 
 def _resolve_memory_mode(
@@ -159,15 +201,25 @@ class HonchoClientConfig:
     dialectic_reasoning_level: str = "low"
     # Max chars of dialectic result to inject into Hermes system prompt
     dialectic_max_chars: int = 600
+    # Honcho API limits — configurable for self-hosted instances
+    # Max chars per message sent via add_messages() (Honcho cloud: 25000)
+    message_max_chars: int = 25000
+    # Max chars for dialectic query input to peer.chat() (Honcho cloud: 10000)
+    dialectic_max_input_chars: int = 10000
     # Recall mode: how memory retrieval works when Honcho is active.
     # "hybrid"  — auto-injected context + Honcho tools available (model decides)
     # "context" — auto-injected context only, Honcho tools removed
     # "tools"   — Honcho tools only, no auto-injected context
     recall_mode: str = "hybrid"
-    # Observation mode: how Honcho peers observe each other.
-    # "unified"      — user peer observes self; all agents share one observation pool
-    # "directional"  — AI peer observes user; each agent keeps its own view
-    observation_mode: str = "unified"
+    # Observation mode: legacy string shorthand ("directional" or "unified").
+    # Kept for backward compat; granular per-peer booleans below are preferred.
+    observation_mode: str = "directional"
+    # Per-peer observation booleans — maps 1:1 to Honcho's SessionPeerConfig.
+    # Resolved from "observation" object in config, falling back to observation_mode preset.
+    user_observe_me: bool = True
+    user_observe_others: bool = True
+    ai_observe_me: bool = True
+    ai_observe_others: bool = True
     # Session resolution
     session_strategy: str = "per-directory"
     session_peer_prefix: bool = False
@@ -253,6 +305,7 @@ class HonchoClientConfig:
 
         base_url = (
             raw.get("baseUrl")
+            or raw.get("base_url")
             or os.environ.get("HONCHO_BASE_URL", "").strip()
             or None
         )
@@ -322,6 +375,16 @@ class HonchoClientConfig:
                 or raw.get("dialecticMaxChars")
                 or 600
             ),
+            message_max_chars=int(
+                host_block.get("messageMaxChars")
+                or raw.get("messageMaxChars")
+                or 25000
+            ),
+            dialectic_max_input_chars=int(
+                host_block.get("dialecticMaxInputChars")
+                or raw.get("dialecticMaxInputChars")
+                or 10000
+            ),
             recall_mode=_normalize_recall_mode(
                 host_block.get("recallMode")
                 or raw.get("recallMode")
@@ -330,7 +393,15 @@ class HonchoClientConfig:
             observation_mode=_normalize_observation_mode(
                 host_block.get("observationMode")
                 or raw.get("observationMode")
-                or "unified"
+                or "directional"
+            ),
+            **_resolve_observation(
+                _normalize_observation_mode(
+                    host_block.get("observationMode")
+                    or raw.get("observationMode")
+                    or "directional"
+                ),
+                host_block.get("observation") or raw.get("observation"),
             ),
             session_strategy=session_strategy,
             session_peer_prefix=session_peer_prefix,
@@ -478,12 +549,22 @@ def get_honcho_client(config: HonchoClientConfig | None = None) -> Honcho:
 
     # Local Honcho instances don't require an API key, but the SDK
     # expects a non-empty string.  Use a placeholder for local URLs.
+    # For local: only use config.api_key if the host block explicitly
+    # sets apiKey (meaning the user wants local auth). Otherwise skip
+    # the stored key -- it's likely a cloud key that would break local.
     _is_local = resolved_base_url and (
         "localhost" in resolved_base_url
         or "127.0.0.1" in resolved_base_url
         or "::1" in resolved_base_url
     )
-    effective_api_key = config.api_key or ("local" if _is_local else None)
+    if _is_local:
+        # Check if the host block has its own apiKey (explicit local auth)
+        _raw = config.raw or {}
+        _host_block = (_raw.get("hosts") or {}).get(config.host, {})
+        _host_has_key = bool(_host_block.get("apiKey"))
+        effective_api_key = config.api_key if _host_has_key else "local"
+    else:
+        effective_api_key = config.api_key
 
     kwargs: dict = {
         "workspace_id": config.workspace_id,
