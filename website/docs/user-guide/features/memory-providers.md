@@ -58,7 +58,7 @@ hermes honcho setup        # (legacy command)
 hermes memory setup        # select "honcho"
 ```
 
-**Config:** `$HERMES_HOME/honcho.json` — see the [config reference](https://github.com/hermes-ai/hermes-agent/blob/main/plugins/memory/honcho/README.md) and the [Honcho integration guide](https://docs.honcho.dev/v3/guides/integrations/hermes).
+**Config:** `$HERMES_HOME/honcho.json` (profile-local) or `~/.honcho/config.json` (global). Resolution order: `$HERMES_HOME/honcho.json` > `~/.hermes/honcho.json` > `~/.honcho/config.json`. See the [config reference](https://github.com/hermes-ai/hermes-agent/blob/main/plugins/memory/honcho/README.md) and the [Honcho integration guide](https://docs.honcho.dev/v3/guides/integrations/hermes).
 
 <details>
 <summary>Key config options</summary>
@@ -77,6 +77,44 @@ hermes memory setup        # select "honcho"
 | `dialecticReasoningLevel` | `low` | `minimal`, `low`, `medium`, `high`, `max` |
 | `dialecticDynamic` | `true` | Auto-bump reasoning by query length |
 | `messageMaxChars` | `25000` | Max chars per message (chunked if exceeded) |
+
+</details>
+
+<details>
+<summary>Minimal honcho.json (cloud)</summary>
+
+```json
+{
+  "apiKey": "your-key-from-app.honcho.dev",
+  "hosts": {
+    "hermes": {
+      "enabled": true,
+      "aiPeer": "hermes",
+      "peerName": "your-name",
+      "workspace": "hermes"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>Minimal honcho.json (self-hosted)</summary>
+
+```json
+{
+  "baseUrl": "http://localhost:8000",
+  "hosts": {
+    "hermes": {
+      "enabled": true,
+      "aiPeer": "hermes",
+      "peerName": "your-name",
+      "workspace": "hermes"
+    }
+  }
+}
+```
 
 </details>
 
