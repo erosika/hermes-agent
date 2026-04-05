@@ -605,7 +605,8 @@ class MatrixAdapter(BasePlatformAdapter):
             content_type=content_type,
             filename=filename,
         )
-        if not isinstance(resp, nio.UploadResponse):
+        upload_response_type = getattr(nio, "UploadResponse", None)
+        if not (isinstance(upload_response_type, type) and isinstance(resp, upload_response_type)):
             err = getattr(resp, "message", str(resp))
             logger.error("Matrix: upload failed: %s", err)
             return SendResult(success=False, error=err)
@@ -1100,7 +1101,8 @@ class MatrixAdapter(BasePlatformAdapter):
                 from gateway.platforms.base import cache_audio_from_bytes
                 
                 resp = await self._client.download(mxc=url)
-                if isinstance(resp, nio.MemoryDownloadResponse):
+                memory_download_type = getattr(nio, "MemoryDownloadResponse", None)
+                if isinstance(memory_download_type, type) and isinstance(resp, memory_download_type):
                     # Extract extension from mimetype or default to .ogg
                     ext = ".ogg"
                     if media_type and "/" in media_type:

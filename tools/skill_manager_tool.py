@@ -205,12 +205,18 @@ def _find_skill(name: str) -> Optional[Dict[str, Any]]:
     """
     Find a skill by name across all skill directories.
 
-    Searches the local skills dir (~/.hermes/skills/) first, then any
-    external dirs configured via skills.external_dirs.  Returns
-    {"path": Path} or None.
+    Searches the local skills dir first, then any external dirs configured via
+    skills.external_dirs. Uses the module-level SKILLS_DIR as the local source
+    of truth so tests and callers can patch it directly.
     """
-    from agent.skill_utils import get_all_skills_dirs
-    for skills_dir in get_all_skills_dirs():
+    from agent.skill_utils import get_external_skills_dirs
+
+    search_dirs = [SKILLS_DIR]
+    for external_dir in get_external_skills_dirs():
+        if external_dir != SKILLS_DIR:
+            search_dirs.append(external_dir)
+
+    for skills_dir in search_dirs:
         if not skills_dir.exists():
             continue
         for skill_md in skills_dir.rglob("SKILL.md"):
