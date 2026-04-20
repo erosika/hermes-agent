@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from agent.memory_provider import MemoryProvider
 from tools.registry import tool_error
+from plugins.memory.honcho import audit
 
 logger = logging.getLogger(__name__)
 
@@ -314,8 +315,46 @@ class HonchoMemoryProvider(MemoryProvider):
                 self._reasoning_heuristic = cfg.reasoning_heuristic
                 if cfg.reasoning_level_cap in self._LEVEL_ORDER:
                     self._reasoning_level_cap = cfg.reasoning_level_cap
+                # Audit log opt-out: memory.honcho.auditLog: false disables it.
+                # Default is on (low volume, rotating).
+                _audit_flag = raw.get("auditLog", True)
+                audit.set_enabled(bool(_audit_flag))
             except Exception as e:
                 logger.debug("Honcho cost-awareness config parse error: %s", e)
+
+            audit.log(
+                "init",
+                session=self._session_key or "(pending)",
+                mode=self._recall_mode,
+                inj_freq=self._injection_frequency,
+                ctx_cadence=self._context_cadence,
+                dial_cadence=self._dialectic_cadence,
+                dial_depth=self._dialectic_depth,
+                base_level=(cfg.dialectic_reasoning_level if cfg else "low"),
+                heuristic=self._reasoning_heuristic,
+                timeout=(cfg.timeout if cfg and cfg.timeout else 8.0),
+            )
+            # Plain-English companion line — intended for human tailers.
+            # Machine parsers can skip any event they don't recognize.
+            try:
+                _cad_phrase = (
+                    "every turn" if self._dialectic_cadence <= 1
+                    else f"every {self._dialectic_cadence} turns"
+                )
+                _ctx_phrase = (
+                    "every turn" if self._context_cadence <= 1
+                    else f"every {self._context_cadence} turns"
+                )
+                _summary = (
+                    f"dialectic {_cad_phrase} (depth {self._dialectic_depth}); "
+                    f"context {_ctx_phrase}; "
+                    f"empty-streak backoff widens cadence by (1+streak); "
+                    f"{(cfg.timeout if cfg and cfg.timeout else 8.0):.1f}s prefetch watchdog; "
+                    f"{self._recall_mode} mode"
+                )
+                audit.log("config.explain", summary=_summary)
+            except Exception:
+                pass
 
             # ----- Port #1969: aiPeer sync from SOUL.md — REMOVED -----
             # SOUL.md is persona content, not identity config. aiPeer should
@@ -412,12 +451,23 @@ class HonchoMemoryProvider(MemoryProvider):
             )
 
             def _prewarm_dialectic() -> None:
+                _t0 = time.monotonic()
+                audit.log("prewarm.start", session=self._session_key)
                 try:
                     r = self._run_dialectic_depth(_prewarm_query)
                 except Exception as exc:
                     logger.debug("Honcho dialectic prewarm failed: %s", exc)
                     self._dialectic_empty_streak += 1
+                    audit.log(
+                        "prewarm.return",
+                        ms=int((time.monotonic() - _t0) * 1000),
+                        chars=0,
+                        empty_reason="exception",
+                        error=str(exc)[:100],
+                        empty_streak=self._dialectic_empty_streak,
+                    )
                     return
+                _ms = int((time.monotonic() - _t0) * 1000)
                 if r and r.strip():
                     with self._prefetch_lock:
                         self._prefetch_result = r
@@ -425,8 +475,21 @@ class HonchoMemoryProvider(MemoryProvider):
                     # Treat prewarm as turn 0 so cadence gating starts clean.
                     self._last_dialectic_turn = 0
                     self._dialectic_empty_streak = 0
+                    audit.log(
+                        "prewarm.return",
+                        ms=_ms,
+                        chars=len(r),
+                        empty_reason="ok",
+                    )
                 else:
                     self._dialectic_empty_streak += 1
+                    audit.log(
+                        "prewarm.return",
+                        ms=_ms,
+                        chars=0,
+                        empty_reason="backend_empty",
+                        empty_streak=self._dialectic_empty_streak,
+                    )
 
             self._prefetch_thread_started_at = time.monotonic()
             self._prefetch_thread = threading.Thread(
@@ -604,10 +667,44 @@ class HonchoMemoryProvider(MemoryProvider):
         # On timeout we let the thread keep running and write its result into
         # _prefetch_result under the lock, so the next turn picks it up.
         #
-        # Skip if the session-start prewarm already filled _prefetch_result —
-        # firing another .chat() would be duplicate work.
+        # Skip if the session-start prewarm already landed OR is still in
+        # flight. Firing a second .chat() while the prewarm thread is still
+        # running wastes a Honcho call and leaves the slower result to
+        # overwrite the faster one (log shows ~10s + ~8s watchdog cost per
+        # new session otherwise).
         with self._prefetch_lock:
             _prewarm_landed = bool(self._prefetch_result)
+        _prewarm_in_flight = (
+            (not _prewarm_landed)
+            and self._prefetch_thread is not None
+            and self._prefetch_thread.is_alive()
+            and self._last_dialectic_turn == -999
+        )
+        if _prewarm_in_flight:
+            # Wait briefly for the prewarm to land; its result will populate
+            # _prefetch_result under the lock.
+            _wait_timeout = (
+                self._config.timeout if self._config and self._config.timeout else 8.0
+            )
+            audit.log(
+                "prewarm.wait",
+                turn=self._turn_count,
+                timeout=_wait_timeout,
+            )
+            self._prefetch_thread.join(timeout=_wait_timeout)
+            with self._prefetch_lock:
+                _prewarm_landed = bool(self._prefetch_result)
+            if not _prewarm_landed and self._prefetch_thread.is_alive():
+                # Prewarm is still running past the watchdog. Don't fire a
+                # duplicate — let it finish in the background and land on
+                # the next turn. Mark first-turn as "handled" so we don't
+                # spawn another thread on this turn.
+                audit.log(
+                    "prewarm.still_running",
+                    turn=self._turn_count,
+                    timeout=_wait_timeout,
+                )
+                self._last_dialectic_turn = self._turn_count
         if _prewarm_landed and self._last_dialectic_turn == -999:
             self._last_dialectic_turn = self._turn_count
 
@@ -618,12 +715,24 @@ class HonchoMemoryProvider(MemoryProvider):
             _fired_at = self._turn_count
 
             def _run_first_turn() -> None:
+                _t0 = time.monotonic()
                 try:
                     r = self._run_dialectic_depth(query)
                 except Exception as exc:
                     logger.debug("Honcho first-turn dialectic failed: %s", exc)
                     self._dialectic_empty_streak += 1
+                    audit.log(
+                        "dialectic.return",
+                        turn=_fired_at,
+                        ms=int((time.monotonic() - _t0) * 1000),
+                        chars=0,
+                        empty_reason="exception",
+                        error=str(exc)[:100],
+                        first_turn=True,
+                        empty_streak=self._dialectic_empty_streak,
+                    )
                     return
+                _ms = int((time.monotonic() - _t0) * 1000)
                 if r and r.strip():
                     with self._prefetch_lock:
                         self._prefetch_result = r
@@ -632,9 +741,34 @@ class HonchoMemoryProvider(MemoryProvider):
                     # turn retries when the call returned nothing.
                     self._last_dialectic_turn = _fired_at
                     self._dialectic_empty_streak = 0
+                    audit.log(
+                        "dialectic.return",
+                        turn=_fired_at,
+                        ms=_ms,
+                        chars=len(r),
+                        empty_reason="ok",
+                        first_turn=True,
+                    )
                 else:
                     self._dialectic_empty_streak += 1
+                    audit.log(
+                        "dialectic.return",
+                        turn=_fired_at,
+                        ms=_ms,
+                        chars=0,
+                        empty_reason="backend_empty",
+                        first_turn=True,
+                        empty_streak=self._dialectic_empty_streak,
+                    )
 
+            audit.log(
+                "prefetch.fire",
+                turn=_fired_at,
+                query_len=len(query),
+                depth=self._dialectic_depth,
+                first_turn=True,
+                timeout=_first_turn_timeout,
+            )
             self._prefetch_thread_started_at = time.monotonic()
             self._prefetch_thread = threading.Thread(
                 target=_run_first_turn, daemon=True, name="honcho-prefetch-first"
@@ -646,6 +780,11 @@ class HonchoMemoryProvider(MemoryProvider):
                     "Honcho first-turn dialectic still running after %.1fs — "
                     "will surface on next turn",
                     _first_turn_timeout,
+                )
+                audit.log(
+                    "prefetch.timeout",
+                    turn=_fired_at,
+                    timeout=_first_turn_timeout,
                 )
 
         if self._prefetch_thread and self._prefetch_thread.is_alive():
@@ -666,19 +805,47 @@ class HonchoMemoryProvider(MemoryProvider):
                 "Honcho pending dialectic discarded as stale: fired_at=%d, "
                 "turn=%d, limit=%d", fired_at, self._turn_count, stale_limit,
             )
+            audit.log(
+                "stale.discard",
+                turn=self._turn_count,
+                fired_at=fired_at,
+                limit=stale_limit,
+                chars=len(dialectic_result),
+            )
             dialectic_result = ""
 
         if dialectic_result and dialectic_result.strip():
             parts.append(dialectic_result)
 
         if not parts:
+            audit.log(
+                "inject.empty",
+                turn=self._turn_count,
+                has_base=bool(base_context),
+                has_dialectic=False,
+            )
             return ""
 
         result = "\n\n".join(parts)
+        _before = len(result)
 
         # ----- Port #3265: token budget enforcement -----
         result = self._truncate_to_budget(result)
 
+        audit.log(
+            "inject.build",
+            turn=self._turn_count,
+            base_chars=len(base_context) if base_context else 0,
+            dial_chars=len(dialectic_result) if dialectic_result else 0,
+            dial_fired_at=fired_at,
+            reused=(
+                bool(dialectic_result)
+                and fired_at >= 0
+                and fired_at < self._turn_count
+            ),
+            total_before=_before,
+            total_after=len(result),
+        )
         return result
 
     def _truncate_to_budget(self, text: str) -> str:
@@ -703,16 +870,22 @@ class HonchoMemoryProvider(MemoryProvider):
         Dialectic fires the LLM reasoning supplement.
         """
         if self._cron_skipped:
+            audit.log("prefetch.skip", turn=self._turn_count, reason="cron")
             return
         if not self._manager or not self._session_key or not query:
+            audit.log(
+                "prefetch.skip", turn=self._turn_count, reason="no_manager_or_query",
+            )
             return
 
         # B1: tools-only mode — no prefetch
         if self._recall_mode == "tools":
+            audit.log("prefetch.skip", turn=self._turn_count, reason="tools_mode")
             return
 
         # Trivial prompts don't warrant either a context refresh or a dialectic call.
         if self._is_trivial_prompt(query):
+            audit.log("prefetch.skip", turn=self._turn_count, reason="trivial")
             return
 
         # ----- Context refresh (base layer) — independent cadence -----
@@ -720,8 +893,12 @@ class HonchoMemoryProvider(MemoryProvider):
             self._last_context_turn = self._turn_count
             try:
                 self._manager.prefetch_context(self._session_key, query)
+                audit.log("context.fire", turn=self._turn_count)
             except Exception as e:
                 logger.debug("Honcho context prefetch failed: %s", e)
+                audit.log(
+                    "context.fire_failed", turn=self._turn_count, error=str(e)[:100],
+                )
 
         # ----- Dialectic prefetch (supplement layer) -----
         # Thread-alive guard with stale-thread recovery: a hung Honcho call
@@ -729,6 +906,14 @@ class HonchoMemoryProvider(MemoryProvider):
         # block subsequent fires.
         if self._thread_is_live():
             logger.debug("Honcho dialectic prefetch skipped: prior thread still running")
+            audit.log(
+                "prefetch.skip",
+                turn=self._turn_count,
+                reason="thread_alive",
+                thread_age_ms=int(
+                    (time.monotonic() - self._prefetch_thread_started_at) * 1000
+                ),
+            )
             return
 
         # Cadence gate, widened by the empty-streak backoff so a persistently
@@ -741,6 +926,15 @@ class HonchoMemoryProvider(MemoryProvider):
                 effective, self._dialectic_cadence, self._dialectic_empty_streak,
                 self._turn_count - self._last_dialectic_turn,
             )
+            audit.log(
+                "prefetch.skip",
+                turn=self._turn_count,
+                reason="cadence",
+                effective=effective,
+                base=self._dialectic_cadence,
+                empty_streak=self._dialectic_empty_streak,
+                since_last=self._turn_count - self._last_dialectic_turn,
+            )
             return
 
         # Cadence advances only on a non-empty result so empty returns
@@ -748,21 +942,53 @@ class HonchoMemoryProvider(MemoryProvider):
         _fired_at = self._turn_count
 
         def _run():
+            _t0 = time.monotonic()
             try:
                 result = self._run_dialectic_depth(query)
             except Exception as e:
                 logger.debug("Honcho prefetch failed: %s", e)
                 self._dialectic_empty_streak += 1
+                audit.log(
+                    "dialectic.return",
+                    turn=_fired_at,
+                    ms=int((time.monotonic() - _t0) * 1000),
+                    chars=0,
+                    empty_reason="exception",
+                    error=str(e)[:100],
+                    empty_streak=self._dialectic_empty_streak,
+                )
                 return
+            _ms = int((time.monotonic() - _t0) * 1000)
             if result and result.strip():
                 with self._prefetch_lock:
                     self._prefetch_result = result
                     self._prefetch_result_fired_at = _fired_at
                 self._last_dialectic_turn = _fired_at
                 self._dialectic_empty_streak = 0
+                audit.log(
+                    "dialectic.return",
+                    turn=_fired_at,
+                    ms=_ms,
+                    chars=len(result),
+                    empty_reason="ok",
+                )
             else:
                 self._dialectic_empty_streak += 1
+                audit.log(
+                    "dialectic.return",
+                    turn=_fired_at,
+                    ms=_ms,
+                    chars=0,
+                    empty_reason="backend_empty",
+                    empty_streak=self._dialectic_empty_streak,
+                )
 
+        audit.log(
+            "prefetch.fire",
+            turn=_fired_at,
+            query_len=len(query),
+            depth=self._dialectic_depth,
+        )
         self._prefetch_thread_started_at = time.monotonic()
         self._prefetch_thread = threading.Thread(
             target=_run, daemon=True, name="honcho-prefetch"
@@ -1010,6 +1236,21 @@ class HonchoMemoryProvider(MemoryProvider):
     def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
         """Track turn count for cadence and injection_frequency logic."""
         self._turn_count = turn_number
+        # Emit a boundary marker so audit-log readers can group events by turn
+        # without heuristics. Carries a short preview of the user message.
+        try:
+            preview = (message or "").strip().replace("\n", " ")
+            if len(preview) > 80:
+                preview = preview[:77] + "..."
+            audit.log(
+                "turn.begin",
+                turn=turn_number,
+                query_len=len(message or ""),
+                preview=preview,
+            )
+        except Exception:
+            # Audit must never break the plugin.
+            pass
 
     @staticmethod
     def _chunk_message(content: str, limit: int) -> list[str]:

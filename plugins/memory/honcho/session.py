@@ -6,6 +6,7 @@ import queue
 import re
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, TYPE_CHECKING
@@ -520,12 +521,25 @@ class HonchoSessionManager:
         Returns:
             Honcho's synthesized answer, or empty string on failure.
         """
+        from plugins.memory.honcho import audit
+
         session = self._cache.get(session_key)
         if not session:
+            audit.log(
+                "chat.skip",
+                session=session_key,
+                reason="no_session",
+            )
             return ""
 
         target_peer_id = self._resolve_peer_id(session, peer)
         if target_peer_id is None:
+            audit.log(
+                "chat.skip",
+                session=session_key,
+                peer=peer,
+                reason="no_peer",
+            )
             return ""
 
         # Guard: truncate query to Honcho's dialectic input limit
@@ -537,6 +551,7 @@ class HonchoSessionManager:
         else:
             level = self._default_reasoning_level()
 
+        _t0 = time.monotonic()
         try:
             if self._ai_observe_others:
                 # AI peer can observe other peers — use assistant as observer.
@@ -554,12 +569,31 @@ class HonchoSessionManager:
                 target_peer = self._get_or_create_peer(target_peer_id)
                 result = target_peer.chat(query, reasoning_level=level) or ""
 
+            _ms = int((time.monotonic() - _t0) * 1000)
+
             # Apply Hermes-side char cap before caching
             if result and self._dialectic_max_chars and len(result) > self._dialectic_max_chars:
                 result = result[:self._dialectic_max_chars].rsplit(" ", 1)[0] + " …"
+
+            audit.log(
+                "chat.return",
+                peer=peer,
+                level=level,
+                ms=_ms,
+                chars=len(result) if result else 0,
+                empty=not bool(result),
+            )
             return result
         except Exception as e:
+            _ms = int((time.monotonic() - _t0) * 1000)
             logger.warning("Honcho dialectic query failed: %s", e)
+            audit.log(
+                "chat.exception",
+                peer=peer,
+                level=level,
+                ms=_ms,
+                error=str(e)[:160],
+            )
             return ""
 
     def prefetch_context(self, session_key: str, user_message: str | None = None) -> None:

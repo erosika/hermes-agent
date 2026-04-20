@@ -1758,3 +1758,157 @@ class TestGetSessionContextFallback:
         peer_id, target = fetch_calls[0]
         assert peer_id == "ai-peer", f"expected ai-peer, got {peer_id}"
         assert target == "ai-peer"
+
+
+class TestFirstTurnPrewarmRace:
+    """Guards against the duplicate-fire bug where turn 1 spawns a second
+    dialectic thread while the session-start prewarm is still in flight.
+
+    Before fix: prewarm runs in background; turn 1's prefetch() checks
+    _prefetch_result (still empty, prewarm not done), sees _last_dialectic_turn
+    == -999, and fires a *second* dialectic thread. Result: two Honcho calls
+    and ~8s of wasted watchdog latency on every new session.
+
+    After fix: turn 1 detects the prewarm thread is still alive and joins it
+    with a bounded timeout instead of firing a duplicate.
+    """
+
+    @staticmethod
+    def _make_provider(cfg_extra=None):
+        from unittest.mock import patch, MagicMock
+        from plugins.memory.honcho.client import HonchoClientConfig
+        from plugins.memory.honcho import HonchoMemoryProvider
+
+        defaults = dict(
+            api_key="test-key", enabled=True, recall_mode="hybrid",
+            dialectic_reasoning_level="low", reasoning_heuristic=True,
+            reasoning_level_cap="high", dialectic_depth=1,
+        )
+        if cfg_extra:
+            defaults.update(cfg_extra)
+        cfg = HonchoClientConfig(**defaults)
+        provider = HonchoMemoryProvider()
+        mock_manager = MagicMock()
+        mock_session = MagicMock()
+        mock_session.messages = []
+        mock_manager.get_or_create.return_value = mock_session
+        mock_manager.get_prefetch_context.return_value = None
+        mock_manager.pop_context_result.return_value = None
+        return provider, mock_manager, cfg
+
+    def test_no_duplicate_fire_when_prewarm_inflight(self):
+        """Turn 1 must NOT spawn a second dialectic thread when prewarm
+        is still running. It should wait for the prewarm instead."""
+        import threading
+        import time as _time
+        from unittest.mock import patch, MagicMock
+
+        provider, mgr, cfg = self._make_provider()
+
+        # Gate the dialectic call so prewarm "hangs" until we release it.
+        release = threading.Event()
+        call_count = {"n": 0}
+
+        def _slow_dialectic(*a, **kw):
+            call_count["n"] += 1
+            # First call (prewarm) blocks until released.
+            if call_count["n"] == 1:
+                release.wait(timeout=5.0)
+                return "prewarm result"
+            # Any additional call is the bug we're guarding against.
+            return "UNEXPECTED SECOND CALL"
+
+        mgr.dialectic_query.side_effect = _slow_dialectic
+
+        # ---- init: prewarm starts, blocks inside _slow_dialectic ----
+        with patch(
+            "plugins.memory.honcho.client.HonchoClientConfig.from_global_config",
+            return_value=cfg,
+        ), patch(
+            "plugins.memory.honcho.client.get_honcho_client", return_value=MagicMock(),
+        ), patch(
+            "plugins.memory.honcho.session.HonchoSessionManager", return_value=mgr,
+        ), patch(
+            "hermes_constants.get_hermes_home", return_value=MagicMock(),
+        ):
+            provider.initialize(session_id="race-test")
+
+        # Prewarm thread is alive + blocked; _prefetch_result still empty.
+        assert provider._prefetch_thread is not None
+        assert provider._prefetch_thread.is_alive()
+        with provider._prefetch_lock:
+            assert provider._prefetch_result == ""
+
+        # ---- turn 1: call prefetch() in a thread so we can release prewarm ----
+        provider.on_turn_start(1, "hello")
+
+        inject_result = {"value": None}
+
+        def _run_prefetch():
+            inject_result["value"] = provider.prefetch("hello")
+
+        prefetch_thread = threading.Thread(target=_run_prefetch, daemon=True)
+        prefetch_thread.start()
+
+        # Give prefetch() a moment to enter the prewarm-wait path.
+        _time.sleep(0.1)
+
+        # Release the prewarm.
+        release.set()
+
+        # prefetch() should now complete by consuming the prewarm result,
+        # NOT by firing a second dialectic call.
+        prefetch_thread.join(timeout=3.0)
+        assert not prefetch_thread.is_alive(), "prefetch() hung"
+
+        # The critical assertion: only ONE dialectic call was made.
+        assert call_count["n"] == 1, (
+            f"expected 1 dialectic call (prewarm only), got {call_count['n']} — "
+            f"turn 1 spawned a duplicate thread while prewarm was in flight"
+        )
+
+        # And the prewarm result should have landed in the inject.
+        assert inject_result["value"] is not None
+        assert "prewarm result" in (inject_result["value"] or "")
+
+    def test_still_fires_when_no_prewarm_thread(self):
+        """If there's no prewarm thread (e.g. recall_mode=tools or prewarm
+        failed synchronously), turn 1 must still fire a first-turn dialectic."""
+        from unittest.mock import patch, MagicMock
+
+        provider, mgr, cfg = self._make_provider()
+
+        mgr.dialectic_query.side_effect = ["first-turn result"]
+
+        with patch(
+            "plugins.memory.honcho.client.HonchoClientConfig.from_global_config",
+            return_value=cfg,
+        ), patch(
+            "plugins.memory.honcho.client.get_honcho_client", return_value=MagicMock(),
+        ), patch(
+            "plugins.memory.honcho.session.HonchoSessionManager", return_value=mgr,
+        ), patch(
+            "hermes_constants.get_hermes_home", return_value=MagicMock(),
+        ):
+            provider.initialize(session_id="no-prewarm-test")
+
+        # Force prewarm thread to appear dead (already completed) with no result.
+        if provider._prefetch_thread:
+            provider._prefetch_thread.join(timeout=3.0)
+        # Clear whatever the prewarm produced to simulate failed prewarm.
+        with provider._prefetch_lock:
+            provider._prefetch_result = ""
+        provider._last_dialectic_turn = -999
+
+        # Queue up a fresh response for the first-turn fire.
+        mgr.dialectic_query.side_effect = ["first-turn result"]
+
+        provider.on_turn_start(1, "hello")
+        inject = provider.prefetch("hello")
+
+        # Wait for first-turn thread.
+        if provider._prefetch_thread:
+            provider._prefetch_thread.join(timeout=3.0)
+
+        # first-turn path should have produced content.
+        assert mgr.dialectic_query.called
