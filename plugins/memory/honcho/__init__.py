@@ -29,6 +29,41 @@ from tools.registry import tool_error
 logger = logging.getLogger(__name__)
 
 
+# Per-call USD cost of a Honcho dialectic .chat() at each reasoning level.
+# Source: Honcho pricing as of 2026-05. Update if Honcho changes pricing.
+REASONING_COST_USD = {
+    "minimal": 0.001,
+    "low":     0.01,
+    "medium":  0.05,
+    "high":    0.10,
+    "max":     0.50,
+}
+
+
+def _cost_for_level(level: str | None) -> float:
+    if not level:
+        return 0.0
+    return REASONING_COST_USD.get(level.lower(), 0.0)
+
+
+# Structured events for honcho.log — single-line key=value records picked up
+# by `hermes honcho watch`. INFO so they survive default log levels; DEBUG
+# logs in this module remain for noisier diagnostics.
+def _event(kind: str, /, **fields) -> None:
+    parts = [f"kind={kind}"]
+    for k, v in fields.items():
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            v = "true" if v else "false"
+        elif isinstance(v, float):
+            v = f"{v:.4f}"
+        elif isinstance(v, str) and (" " in v or "=" in v):
+            v = '"' + v.replace('"', '\\"') + '"'
+        parts.append(f"{k}={v}")
+    logger.info("[honcho.event] " + " ".join(parts))
+
+
 # ---------------------------------------------------------------------------
 # Tool schemas (moved from tools/honcho_tools.py)
 # ---------------------------------------------------------------------------
@@ -556,19 +591,23 @@ class HonchoMemoryProvider(MemoryProvider):
         Port #3265: Truncates to context_tokens budget.
         """
         if self._cron_skipped:
+            _event("prefetch.skip", reason="cron", turn=self._turn_count)
             return ""
 
         # B1: tools-only mode — no auto-injection
         if self._recall_mode == "tools":
+            _event("prefetch.skip", reason="tools_mode", turn=self._turn_count)
             return ""
 
         # B5: injection_frequency — if "first-turn" and past first turn, return empty.
         # _turn_count is 1-indexed (first user message = 1), so > 1 means "past first".
         if self._injection_frequency == "first-turn" and self._turn_count > 1:
+            _event("prefetch.skip", reason="first_turn_only", turn=self._turn_count)
             return ""
 
         # Trivial prompts ("ok", "yes", slash commands) carry no semantic signal.
         if self._is_trivial_prompt(query):
+            _event("prefetch.skip", reason="trivial_prompt", turn=self._turn_count, query_chars=len(query or ""))
             return ""
 
         parts = []
@@ -598,8 +637,18 @@ class HonchoMemoryProvider(MemoryProvider):
                         self._base_context_cache = formatted
                     base_context = formatted
 
+        layer1_chars = 0
+        layer2_chars = 0
+
         if base_context:
             parts.append(base_context)
+            layer1_chars = len(base_context)
+            _event(
+                "layer1.injected",
+                turn=self._turn_count,
+                chars=layer1_chars,
+                has_card=("card" in base_context.lower() or "facts" in base_context.lower()),
+            )
 
         # ----- Layer 2: Dialectic supplement -----
         # On the very first turn, no queue_prefetch() has run yet so the
@@ -674,14 +723,43 @@ class HonchoMemoryProvider(MemoryProvider):
 
         if dialectic_result and dialectic_result.strip():
             parts.append(dialectic_result)
+            layer2_chars = len(dialectic_result)
+            _event(
+                "layer2.injected",
+                turn=self._turn_count,
+                chars=layer2_chars,
+                fired_at=fired_at,
+            )
 
         if not parts:
+            _event("prefetch.empty", turn=self._turn_count)
+            _event(
+                "turn.injected",
+                turn=self._turn_count,
+                layer1_chars=0,
+                layer2_chars=0,
+                total_chars=0,
+                est_tokens=0,
+            )
             return ""
 
         result = "\n\n".join(parts)
 
         # ----- Port #3265: token budget enforcement -----
+        before = len(result)
         result = self._truncate_to_budget(result)
+        if len(result) != before:
+            _event("inject.truncate", turn=self._turn_count, before=before, after=len(result))
+
+        total_chars = len(result)
+        _event(
+            "turn.injected",
+            turn=self._turn_count,
+            layer1_chars=layer1_chars,
+            layer2_chars=layer2_chars,
+            total_chars=total_chars,
+            est_tokens=total_chars // 4,
+        )
 
         return result
 
@@ -713,10 +791,12 @@ class HonchoMemoryProvider(MemoryProvider):
 
         # B1: tools-only mode — no prefetch
         if self._recall_mode == "tools":
+            _event("dialectic.skip", reason="tools_mode", turn=self._turn_count)
             return
 
         # Trivial prompts don't warrant either a context refresh or a dialectic call.
         if self._is_trivial_prompt(query):
+            _event("dialectic.skip", reason="trivial_prompt", turn=self._turn_count, query_chars=len(query))
             return
 
         # ----- Context refresh (base layer) — independent cadence -----
@@ -724,8 +804,10 @@ class HonchoMemoryProvider(MemoryProvider):
             self._last_context_turn = self._turn_count
             try:
                 self._manager.prefetch_context(self._session_key, query)
+                _event("context.refresh", turn=self._turn_count, cadence=self._context_cadence)
             except Exception as e:
                 logger.debug("Honcho context prefetch failed: %s", e)
+                _event("context.refresh_failed", turn=self._turn_count, error=str(e)[:120])
 
         # ----- Dialectic prefetch (supplement layer) -----
         # Thread-alive guard with stale-thread recovery: a hung Honcho call
@@ -733,39 +815,77 @@ class HonchoMemoryProvider(MemoryProvider):
         # block subsequent fires.
         if self._thread_is_live():
             logger.debug("Honcho dialectic prefetch skipped: prior thread still running")
+            _event("dialectic.skip", reason="thread_alive", turn=self._turn_count)
             return
 
         # Cadence gate, widened by the empty-streak backoff so a persistently
         # silent backend doesn't retry every turn forever.
         effective = self._effective_cadence()
-        if (self._turn_count - self._last_dialectic_turn) < effective:
+        since = self._turn_count - self._last_dialectic_turn
+        if since < effective:
             logger.debug(
                 "Honcho dialectic prefetch skipped: effective cadence %d "
                 "(base %d, empty streak %d), turns since last: %d",
                 effective, self._dialectic_cadence, self._dialectic_empty_streak,
-                self._turn_count - self._last_dialectic_turn,
+                since,
+            )
+            _event(
+                "dialectic.skip",
+                reason="cadence_gate",
+                turn=self._turn_count,
+                effective=effective,
+                base=self._dialectic_cadence,
+                empty_streak=self._dialectic_empty_streak,
+                since_last=since,
             )
             return
 
         # Cadence advances only on a non-empty result so empty returns
         # (transient API error, sparse representation) retry next turn.
         _fired_at = self._turn_count
+        _event(
+            "dialectic.fire",
+            turn=self._turn_count,
+            depth=self._dialectic_depth,
+            cadence=self._dialectic_cadence,
+            query_chars=len(query),
+        )
 
         def _run():
+            t0 = time.monotonic()
             try:
                 result = self._run_dialectic_depth(query)
             except Exception as e:
                 logger.debug("Honcho prefetch failed: %s", e)
                 self._dialectic_empty_streak += 1
+                _event(
+                    "dialectic.error",
+                    fired_at=_fired_at,
+                    error=str(e)[:120],
+                    elapsed_ms=int((time.monotonic() - t0) * 1000),
+                )
                 return
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
             if result and result.strip():
                 with self._prefetch_lock:
                     self._prefetch_result = result
                     self._prefetch_result_fired_at = _fired_at
                 self._last_dialectic_turn = _fired_at
                 self._dialectic_empty_streak = 0
+                _event(
+                    "dialectic.result",
+                    fired_at=_fired_at,
+                    chars=len(result),
+                    elapsed_ms=elapsed_ms,
+                )
             else:
                 self._dialectic_empty_streak += 1
+                _event(
+                    "dialectic.empty",
+                    fired_at=_fired_at,
+                    streak=self._dialectic_empty_streak,
+                    elapsed_ms=elapsed_ms,
+                )
 
         self._prefetch_thread_started_at = time.monotonic()
         self._prefetch_thread = threading.Thread(
@@ -968,6 +1088,12 @@ class HonchoMemoryProvider(MemoryProvider):
                 if results and self._signal_sufficient(results[-1]):
                     logger.debug("Honcho dialectic depth %d: pass %d skipped, prior signal sufficient",
                                  self._dialectic_depth, i)
+                    _event(
+                        "dialectic.pass_skip",
+                        depth=self._dialectic_depth,
+                        pass_idx=i,
+                        reason="signal_sufficient",
+                    )
                     break
                 prompt = self._build_dialectic_prompt(i, results, is_cold)
 
@@ -975,12 +1101,23 @@ class HonchoMemoryProvider(MemoryProvider):
             logger.debug("Honcho dialectic depth %d: pass %d, level=%s, cold=%s",
                          self._dialectic_depth, i, level, is_cold)
 
+            t_pass = time.monotonic()
             result = self._manager.dialectic_query(
                 self._session_key, prompt,
                 reasoning_level=level,
                 peer="user",
             )
             results.append(result or "")
+            _event(
+                "dialectic.pass",
+                depth=self._dialectic_depth,
+                pass_idx=i,
+                level=level,
+                cold=is_cold,
+                chars=len(result or ""),
+                elapsed_ms=int((time.monotonic() - t_pass) * 1000),
+                cost_usd=_cost_for_level(level),
+            )
 
         # Return the last non-empty result (deepest pass that ran)
         for r in reversed(results):
@@ -1225,9 +1362,12 @@ class HonchoMemoryProvider(MemoryProvider):
                 if card_update:
                     result = self._manager.set_peer_card(self._session_key, card_update, peer=peer)
                     if result is None:
+                        _event("card.set_failed", peer=peer, turn=self._turn_count)
                         return tool_error("Failed to update peer card.")
+                    _event("card.set", peer=peer, facts=len(result), turn=self._turn_count)
                     return json.dumps({"result": f"Peer card updated ({len(result)} facts).", "card": result})
                 card = self._manager.get_peer_card(self._session_key, peer=peer)
+                _event("card.fetch", peer=peer, facts=len(card) if card else 0, turn=self._turn_count)
                 if not card:
                     return json.dumps(self._empty_profile_hint(peer))
                 return json.dumps({"result": card})
@@ -1251,6 +1391,7 @@ class HonchoMemoryProvider(MemoryProvider):
                     return tool_error("Missing required parameter: query")
                 peer = args.get("peer", "user")
                 reasoning_level = args.get("reasoning_level")
+                t0 = time.monotonic()
                 result = self._manager.dialectic_query(
                     self._session_key, query,
                     reasoning_level=reasoning_level,
@@ -1258,6 +1399,15 @@ class HonchoMemoryProvider(MemoryProvider):
                 )
                 # Update cadence tracker so auto-injection respects the gap after an explicit call
                 self._last_dialectic_turn = self._turn_count
+                _event(
+                    "tool.honcho_reasoning",
+                    peer=peer,
+                    level=reasoning_level or "default",
+                    chars=len(result or ""),
+                    elapsed_ms=int((time.monotonic() - t0) * 1000),
+                    turn=self._turn_count,
+                    cost_usd=_cost_for_level(reasoning_level),
+                )
                 return json.dumps({"result": result or "No result from Honcho."})
 
             elif tool_name == "honcho_context":

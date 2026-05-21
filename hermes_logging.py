@@ -146,6 +146,7 @@ COMPONENT_PREFIXES = {
     "tools": ("tools",),
     "cli": ("hermes_cli", "cli"),
     "cron": ("cron",),
+    "honcho": ("plugins.memory.honcho",),
 }
 
 
@@ -244,6 +245,19 @@ def setup_logging(
             log_filter=_ComponentFilter(COMPONENT_PREFIXES["gateway"]),
         )
 
+    # --- honcho.log (DEBUG+, honcho memory plugin only) ---------------------
+    # Always-on across CLI and gateway so a single tail captures every
+    # decision the dialectic/peer-card layers make in either process.
+    _add_rotating_handler(
+        root,
+        log_dir / "honcho.log",
+        level=logging.DEBUG,
+        max_bytes=5 * 1024 * 1024,
+        backup_count=3,
+        formatter=RedactingFormatter(_LOG_FORMAT),
+        log_filter=_ComponentFilter(COMPONENT_PREFIXES["honcho"]),
+    )
+
     if _logging_initialized and not force:
         return log_dir
 
@@ -254,6 +268,12 @@ def setup_logging(
     # Suppress noisy third-party loggers.
     for name in _NOISY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
+
+    # Force honcho plugin logger to DEBUG so honcho.log captures decision
+    # events even when root log level is INFO. The _ComponentFilter on
+    # honcho.log keeps it scoped; other handlers ignore these via their
+    # own level filters or component filters.
+    logging.getLogger("plugins.memory.honcho").setLevel(logging.DEBUG)
 
     _logging_initialized = True
     return log_dir
