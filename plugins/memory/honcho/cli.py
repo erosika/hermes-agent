@@ -1076,6 +1076,347 @@ def cmd_identity(args) -> None:
         print("  Failed to seed identity. Check logs for details.\n")
 
 
+def cmd_cost(args) -> None:
+    """Aggregate honcho.log into a per-session/window cost + injection report.
+
+    Reads ~/.hermes/logs/honcho.log (and rotated siblings), parses
+    [honcho.event] lines, and prints totals: dialectic call counts by
+    reasoning level, USD spend (using REASONING_COST_USD), turns, total
+    injected chars/est-tokens, and per-turn averages.
+    """
+    import re
+    from datetime import datetime, timedelta, timezone
+
+    from hermes_cli.colors import Colors, color
+    from plugins.memory.honcho import REASONING_COST_USD
+
+    home = get_hermes_home()
+    target_profile = getattr(args, "target_profile", None)
+    if target_profile:
+        try:
+            from hermes_cli.profiles import get_profile_dir
+            home = get_profile_dir(target_profile)
+        except Exception as e:
+            print(color(f"  could not resolve profile {target_profile!r}: {e}", Colors.RED))
+            return
+
+    log_dir = home / "logs"
+    if not log_dir.exists():
+        print(color(f"  no logs dir at {log_dir}", Colors.RED))
+        return
+
+    # Include rotated honcho.log.* siblings so a long --since window works.
+    log_files = sorted(log_dir.glob("honcho.log*"))
+    if not log_files:
+        print(color(f"  no honcho.log in {log_dir}", Colors.RED))
+        return
+
+    since_arg = getattr(args, "since", None)
+    cutoff: datetime | None = None
+    if since_arg:
+        m = re.fullmatch(r"(\d+)([hdm])", since_arg.strip().lower())
+        if not m:
+            print(color(f"  bad --since {since_arg!r}; expected forms like 1h, 24h, 7d, 30m", Colors.RED))
+            return
+        n, unit = int(m.group(1)), m.group(2)
+        delta = timedelta(hours=n) if unit == "h" else timedelta(days=n) if unit == "d" else timedelta(minutes=n)
+        cutoff = datetime.now() - delta
+
+    session_filter = getattr(args, "session", None)
+
+    ts_re = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),(\d{3})")
+    session_re = re.compile(r"\[([^\]]+)\] plugins\.memory\.honcho:")
+    event_re = re.compile(r"\[honcho\.event\]\s+(.*)$")
+    kv_re = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\S+)')
+
+    counts_by_level: dict[str, int] = {}
+    cost_by_level: dict[str, float] = {}
+    total_dialectic_calls = 0
+    total_dialectic_ms = 0
+    total_dialectic_cost = 0.0
+    turn_chars: list[int] = []
+    turn_tokens: list[int] = []
+    layer1_chars_total = 0
+    layer2_chars_total = 0
+    skip_reasons: dict[str, int] = {}
+    fires = 0
+    sessions_seen: set[str] = set()
+    earliest: datetime | None = None
+    latest: datetime | None = None
+
+    for path in log_files:
+        try:
+            for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                ts_m = ts_re.match(raw)
+                if not ts_m:
+                    continue
+                try:
+                    ts = datetime.strptime(f"{ts_m.group(1)}.{ts_m.group(2)}", "%Y-%m-%d %H:%M:%S.%f")
+                except ValueError:
+                    continue
+                if cutoff and ts < cutoff:
+                    continue
+                if session_filter:
+                    sm = session_re.search(raw)
+                    if not sm or session_filter not in sm.group(1):
+                        continue
+                sm = session_re.search(raw)
+                if sm:
+                    sessions_seen.add(sm.group(1))
+                ev_m = event_re.search(raw)
+                if not ev_m:
+                    continue
+                fields = {}
+                for k, v in kv_re.findall(ev_m.group(1)):
+                    if v.startswith('"') and v.endswith('"'):
+                        v = v[1:-1].replace('\\"', '"')
+                    fields[k] = v
+                kind = fields.get("kind", "")
+                earliest = ts if earliest is None else min(earliest, ts)
+                latest = ts if latest is None else max(latest, ts)
+
+                if kind == "dialectic.pass":
+                    total_dialectic_calls += 1
+                    level = fields.get("level", "unknown")
+                    counts_by_level[level] = counts_by_level.get(level, 0) + 1
+                    cost = float(fields.get("cost_usd", 0.0) or 0.0)
+                    cost_by_level[level] = cost_by_level.get(level, 0.0) + cost
+                    total_dialectic_cost += cost
+                    total_dialectic_ms += int(fields.get("elapsed_ms", 0) or 0)
+                elif kind == "tool.honcho_reasoning":
+                    total_dialectic_calls += 1
+                    level = fields.get("level", "unknown")
+                    counts_by_level[level] = counts_by_level.get(level, 0) + 1
+                    cost = float(fields.get("cost_usd", 0.0) or 0.0)
+                    cost_by_level[level] = cost_by_level.get(level, 0.0) + cost
+                    total_dialectic_cost += cost
+                    total_dialectic_ms += int(fields.get("elapsed_ms", 0) or 0)
+                elif kind == "dialectic.fire":
+                    fires += 1
+                elif kind == "dialectic.skip":
+                    reason = fields.get("reason", "unknown")
+                    skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+                elif kind == "turn.injected":
+                    turn_chars.append(int(fields.get("total_chars", 0) or 0))
+                    turn_tokens.append(int(fields.get("est_tokens", 0) or 0))
+                    layer1_chars_total += int(fields.get("layer1_chars", 0) or 0)
+                    layer2_chars_total += int(fields.get("layer2_chars", 0) or 0)
+        except Exception as e:
+            print(color(f"  could not read {path.name}: {e}", Colors.RED))
+
+    turns = len(turn_chars)
+    avg_chars = (sum(turn_chars) // turns) if turns else 0
+    avg_tokens = (sum(turn_tokens) // turns) if turns else 0
+    fire_rate = (fires / turns * 100) if turns else 0.0
+
+    bold = lambda s: color(s, Colors.BOLD)
+    dim = lambda s: color(s, Colors.DIM)
+
+    window_label = since_arg or (
+        f"{earliest:%Y-%m-%d %H:%M} → {latest:%Y-%m-%d %H:%M}"
+        if earliest and latest else "all time"
+    )
+    print()
+    print(f"  {bold('honcho cost report')}  {dim(window_label)}")
+    if session_filter:
+        print(f"  {dim('session filter:')} {session_filter}")
+    print(f"  {dim('logs:')} {log_dir}")
+    print()
+
+    print(f"  {bold('Turns')}")
+    print(f"    turns w/ injection : {turns}")
+    print(f"    sessions seen      : {len(sessions_seen)}")
+    print(f"    avg chars / turn   : {avg_chars}")
+    print(f"    avg est-tokens/turn: {avg_tokens}")
+    print(f"    layer1 chars total : {layer1_chars_total}")
+    print(f"    layer2 chars total : {layer2_chars_total}")
+    print()
+
+    print(f"  {bold('Dialectic')}")
+    print(f"    fires            : {fires}  ({fire_rate:.1f}% of turns)")
+    print(f"    chat calls       : {total_dialectic_calls}  (incl. multi-pass + tool calls)")
+    print(f"    wall-clock total : {total_dialectic_ms / 1000:.1f}s")
+    print(f"    estimated cost   : {color(f'${total_dialectic_cost:.4f}', Colors.GREEN, Colors.BOLD)}")
+    print()
+
+    if counts_by_level:
+        print(f"  {bold('By reasoning level')}")
+        print(f"    {'level':<8} {'calls':>6} {'$/call':>8} {'subtotal':>10}")
+        for level in ("minimal", "low", "medium", "high", "max"):
+            n = counts_by_level.get(level, 0)
+            if not n:
+                continue
+            unit = REASONING_COST_USD.get(level, 0.0)
+            sub = cost_by_level.get(level, 0.0)
+            print(f"    {level:<8} {n:>6} {unit:>8.3f} {sub:>10.4f}")
+        # Levels we don't have a price for (dynamic 'default', misconfigured)
+        misc = sum(n for lvl, n in counts_by_level.items() if lvl not in REASONING_COST_USD)
+        if misc:
+            print(f"    {'other':<8} {misc:>6} {'?':>8} {'?':>10}  (no priced level)")
+        print()
+
+    if skip_reasons:
+        print(f"  {bold('Dialectic skips')}")
+        for reason, n in sorted(skip_reasons.items(), key=lambda kv: -kv[1]):
+            print(f"    {reason:<20} {n}")
+        print()
+
+    if turns == 0 and total_dialectic_calls == 0:
+        print(dim("  no events matched — try widening --since or check that honcho.log has activity"))
+
+
+def cmd_watch(args) -> None:
+    """Tail honcho.log with colorized event formatting.
+
+    Shows live decision events from the Honcho memory plugin (peer-card
+    injection, dialectic firing/skipping, cadence gates) so callers can
+    verify what the layer actually does turn-by-turn. Reads
+    ``~/.hermes/logs/honcho.log`` written by both CLI and gateway processes,
+    so a single watch session covers every Honcho code path.
+    """
+    import re
+    import time
+
+    from hermes_cli.colors import Colors, color
+
+    home = get_hermes_home()
+    target_profile = getattr(args, "target_profile", None)
+    if target_profile:
+        try:
+            from hermes_cli.profiles import get_profile_dir
+            home = get_profile_dir(target_profile)
+        except Exception as e:
+            print(color(f"  could not resolve profile {target_profile!r}: {e}", Colors.RED))
+            return
+
+    log_path = home / "logs" / "honcho.log"
+
+    follow = not getattr(args, "no_follow", False)
+    last_n = max(0, int(getattr(args, "last", 50) or 0))
+    raw = bool(getattr(args, "raw", False))
+    filt = getattr(args, "filter", None)
+    filter_set = {f.strip() for f in filt.split(",")} if filt else None
+
+    # Color routing per event kind. Anything not listed renders dim.
+    kind_color = {
+        "dialectic.fire": (Colors.GREEN,),
+        "dialectic.result": (Colors.GREEN, Colors.BOLD),
+        "dialectic.pass": (Colors.GREEN,),
+        "dialectic.pass_skip": (Colors.DIM,),
+        "dialectic.skip": (Colors.DIM,),
+        "dialectic.empty": (Colors.YELLOW,),
+        "dialectic.error": (Colors.RED, Colors.BOLD),
+        "layer1.injected": (Colors.CYAN,),
+        "layer2.injected": (Colors.CYAN, Colors.BOLD),
+        "card.fetch": (Colors.YELLOW,),
+        "card.set": (Colors.YELLOW, Colors.BOLD),
+        "card.set_failed": (Colors.RED,),
+        "context.refresh": (Colors.BLUE,),
+        "context.refresh_failed": (Colors.RED,),
+        "tool.honcho_reasoning": (Colors.MAGENTA,),
+        "prefetch.skip": (Colors.DIM,),
+        "prefetch.empty": (Colors.DIM,),
+        "inject.truncate": (Colors.DIM,),
+    }
+
+    event_re = re.compile(r"\[honcho\.event\]\s+kind=(\S+)\s*(.*)$")
+
+    def _render(line: str) -> str | None:
+        line = line.rstrip("\n")
+        if not line:
+            return None
+        m = event_re.search(line)
+        if not m:
+            # Non-event line (warnings, debug, etc.) — show dim unless raw.
+            return line if raw else color(line, Colors.DIM)
+        kind, rest = m.group(1), m.group(2).strip()
+        if filter_set and kind not in filter_set:
+            return None
+        # Try to extract a leading timestamp from the standard format:
+        # "YYYY-MM-DD HH:MM:SS,mmm LEVEL [tag] name: ..."
+        ts = ""
+        head = line.split(" ", 2)
+        if len(head) >= 2 and len(head[0]) == 10 and len(head[1]) >= 8:
+            ts = head[0][5:] + " " + head[1].split(",")[0]
+        codes = kind_color.get(kind, (Colors.DIM,))
+        if raw:
+            return line
+        return f"{color(ts, Colors.DIM):>16}  {color(kind, *codes):<26} {rest}"
+
+    if not log_path.exists():
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.touch()
+
+    print(color(f"  watching {log_path}", Colors.DIM))
+    if filter_set:
+        print(color(f"  filter: {','.join(sorted(filter_set))}", Colors.DIM))
+    print()
+
+    # Replay last N lines if requested.
+    if last_n:
+        try:
+            with log_path.open("rb") as fh:
+                fh.seek(0, 2)
+                size = fh.tell()
+                # Walk backward in 4 KiB chunks until we collect last_n newlines
+                chunks = []
+                count = 0
+                pos = size
+                while pos > 0 and count <= last_n:
+                    step = min(4096, pos)
+                    pos -= step
+                    fh.seek(pos)
+                    block = fh.read(step)
+                    chunks.append(block)
+                    count += block.count(b"\n")
+                tail = b"".join(reversed(chunks)).decode("utf-8", errors="replace")
+                lines = tail.splitlines()[-last_n:]
+                for ln in lines:
+                    out = _render(ln)
+                    if out is not None:
+                        print(out)
+        except Exception as e:
+            print(color(f"  (replay failed: {e})", Colors.RED))
+
+    if not follow:
+        return
+
+    # Tail loop: track inode + size to detect rotation.
+    try:
+        fh = log_path.open("r", encoding="utf-8", errors="replace")
+        fh.seek(0, 2)  # end
+        last_inode = log_path.stat().st_ino
+        last_size = log_path.stat().st_size
+        while True:
+            chunk = fh.read()
+            if chunk:
+                for ln in chunk.splitlines():
+                    out = _render(ln)
+                    if out is not None:
+                        print(out, flush=True)
+                continue
+            try:
+                st = log_path.stat()
+                if st.st_ino != last_inode or st.st_size < last_size:
+                    fh.close()
+                    fh = log_path.open("r", encoding="utf-8", errors="replace")
+                    last_inode = st.st_ino
+                    last_size = 0
+                else:
+                    last_size = st.st_size
+            except FileNotFoundError:
+                pass
+            time.sleep(0.25)
+    except KeyboardInterrupt:
+        print()
+        return
+    finally:
+        try:
+            fh.close()
+        except Exception:
+            pass
+
+
 def cmd_migrate(args) -> None:
     """Step-by-step migration guide: OpenClaw native memory → Hermes + Honcho."""
     from pathlib import Path
@@ -1346,9 +1687,13 @@ def honcho_command(args) -> None:
         cmd_disable(args)
     elif sub == "sync":
         cmd_sync(args)
+    elif sub == "watch":
+        cmd_watch(args)
+    elif sub == "cost":
+        cmd_cost(args)
     else:
         print(f"  Unknown honcho command: {sub}")
-        print("  Available: status, sessions, map, peer, mode, strategy, tokens, identity, migrate, enable, disable, sync\n")
+        print("  Available: status, sessions, map, peer, mode, strategy, tokens, identity, migrate, enable, disable, sync, watch, cost\n")
 
 
 def register_cli(subparser) -> None:
@@ -1447,5 +1792,39 @@ def register_cli(subparser) -> None:
     subs.add_parser("enable", help="Enable Honcho for the active profile")
     subs.add_parser("disable", help="Disable Honcho for the active profile")
     subs.add_parser("sync", help="Sync Honcho config to all existing profiles")
+
+    watch_parser = subs.add_parser(
+        "watch",
+        help="Live-tail honcho.log with colorized event formatting",
+    )
+    watch_parser.add_argument(
+        "--last", type=int, default=50, metavar="N",
+        help="Replay the last N lines before following (default 50, 0 = no replay)",
+    )
+    watch_parser.add_argument(
+        "--no-follow", action="store_true",
+        help="Print existing log content and exit instead of tailing",
+    )
+    watch_parser.add_argument(
+        "--filter", metavar="KINDS",
+        help="Comma-separated event kinds to show (e.g. dialectic.fire,layer1.injected)",
+    )
+    watch_parser.add_argument(
+        "--raw", action="store_true",
+        help="Disable colorization and reformatting; print raw log lines",
+    )
+
+    cost_parser = subs.add_parser(
+        "cost",
+        help="Aggregate honcho.log into a dialectic-cost + injection report",
+    )
+    cost_parser.add_argument(
+        "--since", metavar="WINDOW",
+        help="Time window: 30m / 1h / 24h / 7d (default: all entries in honcho.log)",
+    )
+    cost_parser.add_argument(
+        "--session", metavar="ID",
+        help="Filter to records whose session tag contains this substring",
+    )
 
     subparser.set_defaults(func=honcho_command)

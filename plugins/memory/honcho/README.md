@@ -99,6 +99,46 @@ Five bidirectional tools. All accept an optional `peer` parameter (`"user"` or `
 
 Tool visibility depends on `recallMode`: hidden in `context` mode, always present in `tools` and `hybrid`.
 
+## Observability
+
+Every Honcho decision (cadence-gate skip, dialectic fire, layer injection, peer-card fetch/set) is emitted as a single-line structured event to `~/.hermes/logs/honcho.log`. The same handler is active in CLI and gateway processes, so one tail covers both.
+
+```bash
+hermes honcho watch                              # live tail with colorized events
+hermes honcho watch --filter dialectic.fire,turn.injected
+hermes honcho watch --no-follow --last 200       # replay-only
+hermes honcho --target-profile coder watch       # cross-profile
+
+hermes honcho cost                               # aggregate report (all time)
+hermes honcho cost --since 24h                   # last 24 hours
+hermes honcho cost --session abc123              # filter by session
+```
+
+Event kinds:
+
+| Kind | When |
+|------|------|
+| `prefetch.skip` | Auto-injection skipped (`reason=cron|tools_mode|first_turn_only|trivial_prompt`) |
+| `layer1.injected` | Base context (representation + card) attached to the system prompt |
+| `layer2.injected` | Dialectic supplement attached to the system prompt |
+| `turn.injected` | Per-turn rollup: `layer1_chars`, `layer2_chars`, `total_chars`, `est_tokens` |
+| `dialectic.fire` | Dialectic prefetch dispatched (passes the cadence gate) |
+| `dialectic.skip` | Dialectic prefetch suppressed (`reason=cadence_gate|thread_alive|tools_mode|trivial_prompt`) |
+| `dialectic.pass` / `dialectic.pass_skip` | Per-pass record under `dialecticDepth>1`. Carries `cost_usd` per call. |
+| `dialectic.result` / `dialectic.empty` / `dialectic.error` | Outcome of a dispatched dialectic call |
+| `context.refresh` / `context.refresh_failed` | Background base-context refresh |
+| `card.fetch` / `card.set` | `honcho_profile` tool reads/writes |
+| `tool.honcho_reasoning` | Explicit dialectic tool call. Carries `cost_usd`. |
+| `inject.truncate` | `contextTokens` budget clipped the assembled injection |
+
+Per-call dialectic pricing used by `cost_usd` and the `cost` command (USD per `peer.chat()` call):
+
+| Level | minimal | low | medium | high | max |
+|-------|---------|-----|--------|------|-----|
+| Cost | $0.001 | $0.01 | $0.05 | $0.10 | $0.50 |
+
+Defined in `REASONING_COST_USD` in `__init__.py`; update if Honcho changes pricing.
+
 ## Config Resolution
 
 Config is read from the first file that exists:
