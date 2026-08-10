@@ -133,6 +133,22 @@ class TestFromGlobalConfig:
         assert config.context_tokens == 0
 
 
+    def test_context_tokens_negative_collapses_to_uncapped(self, tmp_path):
+        """Negatives parse to 0 so a negative tokens= is never sent to the SDK."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"apiKey": "***", "contextTokens": -5}))
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.context_tokens == 0
+
+
+    def test_context_tokens_unparseable_falls_back_to_unset(self, tmp_path):
+        """A non-integer value is ignored, landing on the unset default."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"apiKey": "***", "contextTokens": "unlimited"}))
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.context_tokens is None
+
+
     def test_precision_knobs_default_to_none(self, tmp_path):
         """Absent precision knobs stay None so the SDK defaults apply."""
         config_file = tmp_path / "config.json"

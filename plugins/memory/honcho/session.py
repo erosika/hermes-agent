@@ -1045,10 +1045,15 @@ class HonchoSessionManager:
 
         try:
             observer_peer_id, target_peer_id = self._resolve_observer_target(session, peer)
+            ctx_kwargs: dict[str, Any] = {}
+            max_conclusions = getattr(self._config, "max_conclusions", None)
+            if max_conclusions is not None:
+                ctx_kwargs["max_conclusions"] = max_conclusions
             ctx = honcho_session.context(
                 summary=True,
                 peer_target=target_peer_id or observer_peer_id,
                 peer_perspective=observer_peer_id,
+                **ctx_kwargs,
             )
 
             result: dict[str, Any] = {}

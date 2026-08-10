@@ -11,8 +11,21 @@ import sys
 from pathlib import Path
 
 from hermes_constants import get_hermes_home
-from plugins.memory.honcho.client import _host_block, profile_host_key, resolve_active_host, resolve_config_path, HOST
+from plugins.memory.honcho.client import DEFAULT_CONTEXT_TOKENS, _host_block, profile_host_key, resolve_active_host, resolve_config_path, HOST
 from hermes_cli.config import cfg_get
+
+
+def _context_tokens_display(host_block: dict, root_cfg: dict) -> str:
+    """Effective contextTokens as shown to the user: host wins, then root, then default."""
+    if "contextTokens" in host_block:
+        val = host_block["contextTokens"]
+    elif "contextTokens" in root_cfg:
+        val = root_cfg["contextTokens"]
+    else:
+        return f"{DEFAULT_CONTEXT_TOKENS} (default)"
+    if val is None or (isinstance(val, (int, float)) and val <= 0):
+        return "uncapped"
+    return str(val)
 
 
 def clone_honcho_for_profile(profile_name: str) -> bool:
@@ -50,9 +63,9 @@ def clone_honcho_for_profile(profile_name: str) -> bool:
                 "dialecticDynamic", "dialecticMaxChars", "messageMaxChars",
                 "dialecticMaxInputChars", "saveMessages", "observation",
                 "pinUserPeer", "userPeerAliases", "runtimePeerPrefix"):
-        val = default_block.get(key)
-        if val is not None:
-            new_block[key] = val
+        # Presence, not truthiness: contextTokens: null means uncapped and must clone.
+        if key in default_block:
+            new_block[key] = default_block[key]
     # Carry a legacy default-block pinPeerName forward under the canonical key.
     if "pinUserPeer" not in new_block and default_block.get("pinPeerName") is not None:
         new_block["pinUserPeer"] = default_block["pinPeerName"]
@@ -120,9 +133,9 @@ def cmd_enable(args) -> None:
                     "maxConclusions", "dialecticReasoningLevel", "dialecticDynamic",
                     "dialecticMaxChars", "messageMaxChars", "dialecticMaxInputChars",
                     "saveMessages", "observation"):
-            val = default_block.get(key)
-            if val is not None and key not in block:
-                block[key] = val
+            # Presence, not truthiness: contextTokens: null means uncapped and must clone.
+            if key in default_block and key not in block:
+                block[key] = default_block[key]
         peer_name = default_block.get("peerName") or cfg.get("peerName")
         if peer_name and "peerName" not in block:
             block["peerName"] = peer_name
@@ -936,27 +949,23 @@ def cmd_setup(args) -> None:
         hermes_host["recallMode"] = new_recall
 
     # --- 7. Context token budget ---
-    current_ctx_tokens = hermes_host.get("contextTokens")
-    if current_ctx_tokens is None:
-        current_ctx_tokens = cfg.get("contextTokens")
-    if current_ctx_tokens is None:
-        current_display = "2000 (default)"
-    elif current_ctx_tokens == 0:
-        current_display = "uncapped"
-    else:
-        current_display = str(current_ctx_tokens)
+    current_display = _context_tokens_display(hermes_host, cfg)
     print("\n  Context injection per turn (hybrid/context recall modes only):")
-    print("    default  -- 2000 tokens per turn")
+    print(f"    default  -- {DEFAULT_CONTEXT_TOKENS} tokens per turn")
     print("    uncapped -- no limit")
     print("    N        -- token limit per turn (e.g. 1200)")
     new_ctx_tokens = _prompt("Context tokens", default=current_display)
     cleaned = new_ctx_tokens.strip().lower()
-    if cleaned in {"none", "uncapped", "no limit"}:
+    if cleaned in {"", current_display.lower()}:
+        pass  # keep current — Enter returns the displayed value verbatim
+    elif cleaned in {"none", "uncapped", "no limit"}:
         hermes_host["contextTokens"] = 0
     elif cleaned == "default":
-        hermes_host.pop("contextTokens", None)
-    elif cleaned in {"", current_display.lower()}:
-        pass  # keep current
+        if "contextTokens" in cfg:
+            # A root-level value would win over an absent host key; pin the default.
+            hermes_host["contextTokens"] = DEFAULT_CONTEXT_TOKENS
+        else:
+            hermes_host.pop("contextTokens", None)
     else:
         try:
             val = int(new_ctx_tokens)
@@ -1213,7 +1222,13 @@ def cmd_status(args) -> None:
     print(f"  Session key:    {hcfg.resolve_session_name()}")
     print(f"  Session strat:  {hcfg.session_strategy}")
     print(f"  Recall mode:    {hcfg.recall_mode}")
-    print(f"  Context budget: {hcfg.context_tokens or '(uncapped)'} tokens")
+    if hcfg.context_tokens is None:
+        budget_display = f"{DEFAULT_CONTEXT_TOKENS} (default)"
+    elif hcfg.context_tokens <= 0:
+        budget_display = "(uncapped)"
+    else:
+        budget_display = str(hcfg.context_tokens)
+    print(f"  Context budget: {budget_display} tokens")
     raw = getattr(hcfg, "raw", None) or {}
     dialectic_cadence = getattr(hcfg, "dialectic_cadence", None) or raw.get("dialecticCadence") or 1
     print(f"  Dialectic cad:  every {dialectic_cadence} turn{'s' if dialectic_cadence != 1 else ''}")
@@ -1497,13 +1512,7 @@ def cmd_tokens(args) -> None:
     dialectic = getattr(args, "dialectic", None)
 
     if context is None and dialectic is None:
-        ctx_tokens = hermes.get("contextTokens")
-        if ctx_tokens is None:
-            ctx_tokens = cfg.get("contextTokens")
-        if ctx_tokens is None:
-            ctx_tokens = "2000 (default)"
-        elif ctx_tokens == 0:
-            ctx_tokens = "uncapped"
+        ctx_tokens = _context_tokens_display(hermes, cfg)
         d_chars = hermes.get("dialecticMaxChars") or cfg.get("dialecticMaxChars") or 600
         d_level = hermes.get("dialecticReasoningLevel") or cfg.get("dialecticReasoningLevel") or "low"
         print("\nHoncho budgets\n" + "─" * 40)

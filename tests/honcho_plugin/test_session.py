@@ -529,6 +529,41 @@ class TestFetchPeerContextPrecisionKnobs:
 
         assert peer.calls == [{"target": "user-peer", "search_query": "q"}]
 
+    def test_session_context_primary_path_passes_max_conclusions(self):
+        """get_session_context honors maxConclusions on the cached-session path, not just the fallback."""
+        from types import SimpleNamespace
+
+        from plugins.memory.honcho.client import HonchoClientConfig
+        from plugins.memory.honcho.session import HonchoSessionManager
+
+        mgr = HonchoSessionManager.__new__(HonchoSessionManager)
+        mgr._config = HonchoClientConfig(api_key="test-key", enabled=True, max_conclusions=7)
+        mgr._cache = {}
+        mgr._sessions_cache = {}
+        mgr._ai_observe_others = True
+
+        session = HonchoSession(
+            key="t", honcho_session_id="sid",
+            user_peer_id="user-peer", assistant_peer_id="ai-peer",
+        )
+        mgr._cache["t"] = session
+        calls = []
+
+        class _FakeHonchoSession:
+            def context(self, **kwargs):
+                calls.append(kwargs)
+                return SimpleNamespace(
+                    summary=None, peer_representation="rep",
+                    peer_card=None, messages=None,
+                )
+
+        mgr._sessions_cache["sid"] = _FakeHonchoSession()
+        result = mgr.get_session_context("t", peer="user")
+
+        assert result.get("representation") == "rep"
+        assert len(calls) == 1
+        assert calls[0]["max_conclusions"] == 7
+
 
 # ---------------------------------------------------------------------------
 # Dialectic input guard

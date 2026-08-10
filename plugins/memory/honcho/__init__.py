@@ -470,6 +470,12 @@ class HonchoMemoryProvider(MemoryProvider):
         from plugins.memory.honcho.session import HonchoSessionManager
 
         client = get_honcho_client(cfg)
+        if cfg.context_tokens is None:
+            from plugins.memory.honcho.client import DEFAULT_CONTEXT_TOKENS
+            logger.info(
+                "Honcho context injection capped at the default %d tokens "
+                "(set contextTokens: 0 to disable)", DEFAULT_CONTEXT_TOKENS,
+            )
         self._manager = HonchoSessionManager(
             honcho=client,
             config=cfg,

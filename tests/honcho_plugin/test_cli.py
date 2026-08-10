@@ -290,6 +290,19 @@ class TestCloneHonchoForProfile:
         assert new_block["pinUserPeer"] is True
         assert "pinPeerName" not in new_block
 
+    def test_explicit_null_context_tokens_clones(self, monkeypatch, tmp_path):
+        """contextTokens: null (uncapped) must survive a profile clone, not become key-absence (the 2000 default)."""
+        cfg = {
+            "apiKey": "***",
+            "hosts": {"hermes": {"contextTokens": None, "peerName": "eri"}},
+        }
+        honcho_cli, written = self._setup_clone_env(monkeypatch, tmp_path, cfg)
+        ok = honcho_cli.clone_honcho_for_profile("coder")
+        assert ok is True
+        new_block = written["cfg"]["hosts"]["hermes_coder"]
+        assert "contextTokens" in new_block
+        assert new_block["contextTokens"] is None
+
     def test_unset_identity_keys_do_not_appear_in_cloned_profile(self, monkeypatch, tmp_path):
         cfg = {
             "apiKey": "***",

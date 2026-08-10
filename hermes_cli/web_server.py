@@ -5095,6 +5095,9 @@ def _apply_field_values(provider: ProviderConfigSchema, values: Dict[str, str], 
         target = target_for(field)
         coerced = _coerce_field_value(field, values[field.key])
         if coerced is _UNSET:
+            # A stored explicit null renders blank; blank back in must not pop it (null = uncapped, absent = default).
+            if any(k in target and target[k] is None for k in (field.key, *field.aliases)):
+                continue
             target.pop(field.key, None)
             for alias in field.aliases:
                 target.pop(alias, None)

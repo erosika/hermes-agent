@@ -153,7 +153,7 @@ def _parse_context_tokens(host_val=_UNSET, root_val=_UNSET) -> int | None:
     """Parse contextTokens: host wins, then root.
 
     Absent → None (provider applies DEFAULT_CONTEXT_TOKENS at injection).
-    Explicit null or 0 → 0 (uncapped). Integer → that cap.
+    Explicit null, 0, or negative → 0 (uncapped). Integer → that cap.
     """
     for val in (host_val, root_val):
         if val is _UNSET:
@@ -161,9 +161,10 @@ def _parse_context_tokens(host_val=_UNSET, root_val=_UNSET) -> int | None:
         if val is None:
             return 0
         try:
-            return int(val)
+            # Negatives collapse to 0: uncapped, and never sent to the SDK.
+            return max(int(val), 0)
         except (ValueError, TypeError):
-            pass
+            logger.warning("Honcho contextTokens value %r is not an integer; ignoring it", val)
     return None
 
 
