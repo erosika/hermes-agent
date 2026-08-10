@@ -167,6 +167,36 @@ def _parse_context_tokens(host_val=_UNSET, root_val=_UNSET) -> int | None:
     return None
 
 
+def _parse_optional_int(host_val, root_val, lo: int, hi: int) -> int | None:
+    """Parse an optional int: host wins, then root, then None. Clamped to [lo, hi]."""
+    for val in (host_val, root_val):
+        if val is not None:
+            try:
+                parsed = int(val)
+            except (ValueError, TypeError):
+                continue
+            clamped = min(max(parsed, lo), hi)
+            if clamped != parsed:
+                logger.warning("Honcho config value %s clamped to %s (valid range %s-%s)", parsed, clamped, lo, hi)
+            return clamped
+    return None
+
+
+def _parse_optional_float(host_val, root_val, lo: float, hi: float) -> float | None:
+    """Parse an optional float: host wins, then root, then None. Clamped to [lo, hi]."""
+    for val in (host_val, root_val):
+        if val is not None:
+            try:
+                parsed = float(val)
+            except (ValueError, TypeError):
+                continue
+            clamped = min(max(parsed, lo), hi)
+            if clamped != parsed:
+                logger.warning("Honcho config value %s clamped to %s (valid range %s-%s)", parsed, clamped, lo, hi)
+            return clamped
+    return None
+
+
 def _parse_int_config(host_val, root_val, default: int) -> int:
     """Parse an integer config: host wins, then root, then default."""
     for val in (host_val, root_val):
@@ -407,6 +437,12 @@ class HonchoClientConfig:
     # Prefetch budget. None = unset (injection defaults to DEFAULT_CONTEXT_TOKENS);
     # 0 = explicitly uncapped; positive int = cap on auto-injected context.
     context_tokens: int | None = None
+    # Server-side retrieval precision for peer.context() — None = Honcho defaults.
+    # search_top_k / search_max_distance shape the search_query fetch;
+    # max_conclusions caps how many conclusions the representation includes.
+    search_top_k: int | None = None
+    search_max_distance: float | None = None
+    max_conclusions: int | None = None
     # Dialectic (peer.chat) settings
     # reasoning_level: "minimal" | "low" | "medium" | "high" | "max"
     dialectic_reasoning_level: str = "low"
@@ -639,6 +675,21 @@ class HonchoClientConfig:
             context_tokens=_parse_context_tokens(
                 host_block.get("contextTokens", _UNSET),
                 raw.get("contextTokens", _UNSET),
+            ),
+            search_top_k=_parse_optional_int(
+                host_block.get("searchTopK"),
+                raw.get("searchTopK"),
+                lo=1, hi=100,
+            ),
+            search_max_distance=_parse_optional_float(
+                host_block.get("searchMaxDistance"),
+                raw.get("searchMaxDistance"),
+                lo=0.0, hi=1.0,
+            ),
+            max_conclusions=_parse_optional_int(
+                host_block.get("maxConclusions"),
+                raw.get("maxConclusions"),
+                lo=1, hi=100,
             ),
             dialectic_reasoning_level=(
                 host_block.get("dialecticReasoningLevel")

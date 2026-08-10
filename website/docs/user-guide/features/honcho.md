@@ -115,6 +115,9 @@ When pointing Hermes at a self-hosted Honcho server, `hermes honcho setup` (and 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `contextTokens` | `2000` | Token budget for auto-injected context per turn. Truncates at word boundaries. Set `0` (or explicit `null`) to disable the cap |
+| `searchTopK` | Honcho default | Conclusions returned for the semantic search fetch (1-100) |
+| `searchMaxDistance` | Honcho default | Semantic distance cutoff for search results (0.0-1.0, lower is stricter) |
+| `maxConclusions` | Honcho default | Cap on conclusions in the peer representation (1-100) |
 | `contextCadence` | `1` | Minimum turns between `context()` API calls (base layer refresh) |
 | `dialecticCadence` | `2` | Minimum turns between `peer.chat()` LLM calls (dialectic layer). Recommended 1–5. In `tools` mode, irrelevant — model calls explicitly |
 | `dialecticDepth` | `1` | Number of `.chat()` passes per dialectic invocation. Clamped to 1–3 |

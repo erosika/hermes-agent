@@ -369,6 +369,9 @@ Config file: `$HERMES_HOME/honcho.json` (profile-local) or `~/.honcho/config.jso
 | Key | Default | Description |
 |-----|---------|-------------|
 | `contextTokens` | `2000` | Max tokens for the combined base context injection (summary + representation + card). Omit for the 2000 default; set `0` to leave uncapped, or an integer to bound injection size. |
+| `searchTopK` | Honcho default | Conclusions returned for the semantic search fetch (1-100). |
+| `searchMaxDistance` | Honcho default | Semantic distance cutoff for search results (0.0-1.0, lower is stricter). |
+| `maxConclusions` | Honcho default | Cap on conclusions in the peer representation (1-100). |
 | `injectionFrequency` | `every-turn` | `every-turn` or `first-turn` |
 | `contextCadence` | `1` | Min turns between context API calls |
 | `dialecticCadence` | `2` | Min turns between dialectic LLM calls (recommended 1–5) |

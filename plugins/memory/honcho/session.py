@@ -987,8 +987,18 @@ class HonchoSessionManager:
             context_kwargs: dict[str, Any] = {}
             if target is not None:
                 context_kwargs["target"] = target
+            max_conclusions = getattr(self._config, "max_conclusions", None)
+            if max_conclusions is not None:
+                context_kwargs["max_conclusions"] = max_conclusions
             if search_query is not None:
                 context_kwargs["search_query"] = search_query
+                # Precision knobs only shape the semantic search path.
+                search_top_k = getattr(self._config, "search_top_k", None)
+                if search_top_k is not None:
+                    context_kwargs["search_top_k"] = search_top_k
+                search_max_distance = getattr(self._config, "search_max_distance", None)
+                if search_max_distance is not None:
+                    context_kwargs["search_max_distance"] = search_max_distance
             ctx = peer.context(**context_kwargs) if context_kwargs else peer.context()
             representation = (
                 getattr(ctx, "representation", None)

@@ -473,6 +473,64 @@ class TestTruncateToBudget:
 
 
 # ---------------------------------------------------------------------------
+# Retrieval precision knobs
+# ---------------------------------------------------------------------------
+
+
+class _FakePeer:
+    def __init__(self):
+        self.calls = []
+
+    def context(self, **kwargs):
+        from types import SimpleNamespace
+        self.calls.append(kwargs)
+        return SimpleNamespace(representation="rep", peer_card=["fact"])
+
+
+class TestFetchPeerContextPrecisionKnobs:
+    def _make_manager(self, **config_kwargs):
+        from plugins.memory.honcho.client import HonchoClientConfig
+        from plugins.memory.honcho.session import HonchoSessionManager
+
+        mgr = HonchoSessionManager.__new__(HonchoSessionManager)
+        mgr._config = HonchoClientConfig(api_key="test-key", enabled=True, **config_kwargs)
+        peer = _FakePeer()
+        mgr._get_or_create_peer = lambda peer_id: peer
+        return mgr, peer
+
+    def test_knobs_passed_with_search_query(self):
+        """All three knobs reach peer.context() when a search query is present."""
+        mgr, peer = self._make_manager(
+            search_top_k=10, search_max_distance=0.4, max_conclusions=25,
+        )
+        mgr._fetch_peer_context("user-peer", search_query="what changed?", target="user-peer")
+
+        assert peer.calls == [{
+            "target": "user-peer",
+            "search_query": "what changed?",
+            "search_top_k": 10,
+            "search_max_distance": 0.4,
+            "max_conclusions": 25,
+        }]
+
+    def test_search_knobs_omitted_without_query(self):
+        """Without a search query, only max_conclusions applies."""
+        mgr, peer = self._make_manager(
+            search_top_k=10, search_max_distance=0.4, max_conclusions=25,
+        )
+        mgr._fetch_peer_context("ai-peer", target="ai-peer")
+
+        assert peer.calls == [{"target": "ai-peer", "max_conclusions": 25}]
+
+    def test_unset_knobs_keep_legacy_kwargs(self):
+        """Unset knobs leave the context() call unchanged."""
+        mgr, peer = self._make_manager()
+        mgr._fetch_peer_context("user-peer", search_query="q", target="user-peer")
+
+        assert peer.calls == [{"target": "user-peer", "search_query": "q"}]
+
+
+# ---------------------------------------------------------------------------
 # Dialectic input guard
 # ---------------------------------------------------------------------------
 

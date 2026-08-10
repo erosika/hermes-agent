@@ -85,6 +85,9 @@ The legacy `hermes honcho setup` command still works (it now redirects to `herme
 | `aiPeer` | host key | AI peer identity (one per profile) |
 | `workspace` | host key | Shared workspace ID |
 | `contextTokens` | `2000` | Token budget for auto-injected context per turn. Truncates at word boundaries. Set `0` (or explicit `null`) to disable the cap |
+| `searchTopK` | Honcho default | Conclusions returned for the semantic search fetch (1-100) |
+| `searchMaxDistance` | Honcho default | Semantic distance cutoff for search results (0.0-1.0, lower is stricter) |
+| `maxConclusions` | Honcho default | Cap on conclusions in the peer representation (1-100) |
 | `contextCadence` | `1` | Minimum turns between `context()` API calls (base layer refresh) |
 | `dialecticCadence` | `2` | Minimum turns between `peer.chat()` LLM calls. Recommended 1–5. Only applies to `hybrid`/`context` modes |
 | `dialecticDepth` | `1` | Number of `.chat()` passes per dialectic invocation. Clamped 1–3. Pass 0: cold/warm prompt, pass 1: self-audit, pass 2: reconciliation |

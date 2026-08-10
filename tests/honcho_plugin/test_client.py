@@ -133,6 +133,46 @@ class TestFromGlobalConfig:
         assert config.context_tokens == 0
 
 
+    def test_precision_knobs_default_to_none(self, tmp_path):
+        """Absent precision knobs stay None so the SDK defaults apply."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"apiKey": "***"}))
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.search_top_k is None
+        assert config.search_max_distance is None
+        assert config.max_conclusions is None
+
+
+    def test_precision_knobs_parsed_from_config(self, tmp_path):
+        """searchTopK, searchMaxDistance, and maxConclusions are read from config."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "apiKey": "***",
+            "searchTopK": 10,
+            "searchMaxDistance": 0.4,
+            "maxConclusions": 25,
+        }))
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.search_top_k == 10
+        assert config.search_max_distance == 0.4
+        assert config.max_conclusions == 25
+
+
+    def test_precision_knobs_clamped_to_sdk_range(self, tmp_path):
+        """Out-of-range values clamp to the SDK bounds instead of failing at call time."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "apiKey": "***",
+            "searchTopK": 500,
+            "searchMaxDistance": -0.5,
+            "maxConclusions": 0,
+        }))
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.search_top_k == 100
+        assert config.search_max_distance == 0.0
+        assert config.max_conclusions == 1
+
+
     def test_recall_mode_from_config(self, tmp_path):
         """recallMode is read from config, host block wins."""
         config_file = tmp_path / "config.json"

@@ -296,6 +296,9 @@ Host key is derived from the active Hermes profile: `hermes` (default) or `herme
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `contextTokens` | int | `2000` | Token budget for auto-injected context (truncation at tokens × 4 chars). `0` or `null` disables the cap. Omitting the key keeps the 2000 default |
+| `searchTopK` | int | Honcho default | Conclusions returned for the `search_query` fetch (1-100) |
+| `searchMaxDistance` | float | Honcho default | Semantic distance cutoff for search results (0.0-1.0, lower is stricter) |
+| `maxConclusions` | int | Honcho default | Cap on conclusions included in the peer representation (1-100) |
 | `messageMaxChars` | int | `25000` | Max chars per message sent via `add_messages()`. Exceeding this triggers chunking with `[continued]` markers. Honcho cloud limit: 25k |
 
 ### Cadence (Cost Control)
