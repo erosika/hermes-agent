@@ -84,7 +84,7 @@ The legacy `hermes honcho setup` command still works (it now redirects to `herme
 | `peerName` | -- | User peer identity |
 | `aiPeer` | host key | AI peer identity (one per profile) |
 | `workspace` | host key | Shared workspace ID |
-| `contextTokens` | `null` (uncapped) | Token budget for auto-injected context per turn. Truncates at word boundaries |
+| `contextTokens` | `2000` | Token budget for auto-injected context per turn. Truncates at word boundaries. Set `0` (or explicit `null`) to disable the cap |
 | `contextCadence` | `1` | Minimum turns between `context()` API calls (base layer refresh) |
 | `dialecticCadence` | `2` | Minimum turns between `peer.chat()` LLM calls. Recommended 1–5. Only applies to `hybrid`/`context` modes |
 | `dialecticDepth` | `1` | Number of `.chat()` passes per dialectic invocation. Clamped 1–3. Pass 0: cold/warm prompt, pass 1: self-audit, pass 2: reconciliation |

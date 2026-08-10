@@ -448,6 +448,30 @@ class TestTruncateToBudget:
         assert len(result) <= 4805
 
 
+    def test_unset_budget_applies_default_cap(self):
+        """context_tokens=None (unset) caps at DEFAULT_CONTEXT_TOKENS."""
+        from plugins.memory.honcho.client import DEFAULT_CONTEXT_TOKENS, HonchoClientConfig
+
+        provider = HonchoMemoryProvider()
+        provider._config = HonchoClientConfig(context_tokens=None)
+
+        huge_text = "x" * (DEFAULT_CONTEXT_TOKENS * 4 + 5000)
+        result = provider._truncate_to_budget(huge_text)
+
+        assert len(result) <= DEFAULT_CONTEXT_TOKENS * 4 + 5
+
+
+    def test_zero_budget_disables_cap(self):
+        """context_tokens=0 means explicitly uncapped."""
+        from plugins.memory.honcho.client import HonchoClientConfig
+
+        provider = HonchoMemoryProvider()
+        provider._config = HonchoClientConfig(context_tokens=0)
+
+        huge_text = "x" * 20000
+        assert provider._truncate_to_budget(huge_text) == huge_text
+
+
 # ---------------------------------------------------------------------------
 # Dialectic input guard
 # ---------------------------------------------------------------------------

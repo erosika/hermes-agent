@@ -473,7 +473,7 @@ class HonchoMemoryProvider(MemoryProvider):
         self._manager = HonchoSessionManager(
             honcho=client,
             config=cfg,
-            context_tokens=cfg.context_tokens,
+            context_tokens=cfg.context_tokens or None,
             runtime_user_peer_name=kwargs.get("user_id") or None,
             runtime_user_peer_name_alt=kwargs.get("user_id_alt") or None,
         )
@@ -868,10 +868,17 @@ class HonchoMemoryProvider(MemoryProvider):
         return dialectic_result if (dialectic_result and dialectic_result.strip()) else ""
 
     def _truncate_to_budget(self, text: str) -> str:
-        """Truncate text to fit within context_tokens budget if set."""
-        if not self._config or not self._config.context_tokens:
+        """Truncate text to the context_tokens budget (unset → DEFAULT_CONTEXT_TOKENS, 0 → uncapped)."""
+        if not self._config:
             return text
-        budget_chars = self._config.context_tokens * 4  # conservative char estimate
+        from plugins.memory.honcho.client import DEFAULT_CONTEXT_TOKENS
+
+        budget = self._config.context_tokens
+        if budget is None:
+            budget = DEFAULT_CONTEXT_TOKENS
+        if budget <= 0:
+            return text
+        budget_chars = budget * 4  # conservative char estimate
         if len(text) <= budget_chars:
             return text
         # Truncate at word boundary

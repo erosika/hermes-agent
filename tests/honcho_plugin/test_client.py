@@ -105,6 +105,34 @@ class TestFromGlobalConfig:
         assert config.context_tokens == 1200
 
 
+    def test_context_tokens_absent_is_unset(self, tmp_path):
+        """Absent contextTokens parses to None (injection applies the default)."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"apiKey": "***"}))
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.context_tokens is None
+
+
+    def test_context_tokens_explicit_null_is_uncapped(self, tmp_path):
+        """Explicit null parses to 0 — deliberately uncapped, not the default."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"apiKey": "***", "contextTokens": None}))
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.context_tokens == 0
+
+
+    def test_context_tokens_host_null_overrides_root_cap(self, tmp_path):
+        """Host-level explicit null wins over a root-level integer cap."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "apiKey": "***",
+            "contextTokens": 1200,
+            "hosts": {"hermes": {"contextTokens": None}},
+        }))
+        config = HonchoClientConfig.from_global_config(config_path=config_file)
+        assert config.context_tokens == 0
+
+
     def test_recall_mode_from_config(self, tmp_path):
         """recallMode is read from config, host block wins."""
         config_file = tmp_path / "config.json"

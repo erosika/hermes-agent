@@ -59,7 +59,7 @@ Every turn (in `hybrid` or `context` mode), Honcho assembles two layers of conte
 1. **Base context** — session summary, user representation, user peer card, AI self-representation, and AI identity card. Refreshed on `contextCadence`. This is the "who is this user" layer.
 2. **Dialectic supplement** — LLM-synthesized reasoning about the user's current state and needs. Refreshed on `dialecticCadence`. This is the "what matters right now" layer.
 
-Both layers are concatenated and truncated to the `contextTokens` budget (if set).
+Both layers are concatenated and truncated to the `contextTokens` budget (default 2000 tokens; `0` disables).
 
 ### Cold/Warm Prompt Selection
 
@@ -114,7 +114,7 @@ When pointing Hermes at a self-hosted Honcho server, `hermes honcho setup` (and 
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `contextTokens` | `null` (uncapped) | Token budget for auto-injected context per turn. Set to an integer (e.g. 1200) to cap. Truncates at word boundaries |
+| `contextTokens` | `2000` | Token budget for auto-injected context per turn. Truncates at word boundaries. Set `0` (or explicit `null`) to disable the cap |
 | `contextCadence` | `1` | Minimum turns between `context()` API calls (base layer refresh) |
 | `dialecticCadence` | `2` | Minimum turns between `peer.chat()` LLM calls (dialectic layer). Recommended 1–5. In `tools` mode, irrelevant — model calls explicitly |
 | `dialecticDepth` | `1` | Number of `.chat()` passes per dialectic invocation. Clamped to 1–3 |

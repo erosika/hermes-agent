@@ -368,12 +368,12 @@ Config file: `$HERMES_HOME/honcho.json` (profile-local) or `~/.honcho/config.jso
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `contextTokens` | uncapped | Max tokens for the combined base context injection (summary + representation + card). Opt-in cap — omit to leave uncapped, set to an integer to bound injection size. |
+| `contextTokens` | `2000` | Max tokens for the combined base context injection (summary + representation + card). Omit for the 2000 default; set `0` to leave uncapped, or an integer to bound injection size. |
 | `injectionFrequency` | `every-turn` | `every-turn` or `first-turn` |
 | `contextCadence` | `1` | Min turns between context API calls |
 | `dialecticCadence` | `2` | Min turns between dialectic LLM calls (recommended 1–5) |
 
-The `contextTokens` budget is enforced at injection time. If the session summary + representation + card exceed the budget, Honcho trims the summary first, then the representation, preserving the card. This prevents context blowup in long sessions.
+The `contextTokens` budget is enforced at injection time. When the combined block exceeds the budget, it is truncated from the end at a word boundary — sections later in the block (AI self-representation, dialectic supplement) are cut first. This prevents context blowup in long sessions.
 
 ### Memory-context sanitization
 
@@ -404,7 +404,7 @@ Observation config is synced from the server on each session init. Start a new s
 Messages over `messageMaxChars` (default 25k) are automatically chunked with `[continued]` markers. If you're hitting this often, check if tool results or skill content is inflating message size.
 
 ### Context injection too large
-If you see warnings about context budget exceeded, lower `contextTokens` or reduce `dialecticDepth`. The session summary is trimmed first when the budget is tight.
+If you see warnings about context budget exceeded, lower `contextTokens` or reduce `dialecticDepth`. The block is truncated from the end when the budget is tight.
 
 ### Session summary missing
 Session summary requires at least one prior turn in the current Honcho session. On cold start (new session, no history), the summary is omitted and Honcho uses the cold-start prompt strategy instead.

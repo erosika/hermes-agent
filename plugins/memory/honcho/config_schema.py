@@ -286,8 +286,8 @@ CONFIG_SCHEMA = ProviderConfigSchema(
             key="contextTokens",
             label="Context token cap",
             kind=KIND_NUMBER,
-            description="Cap on auto-injected context tokens. Blank leaves it uncapped.",
-            placeholder="(uncapped)",
+            description="Cap on auto-injected context tokens. Blank uses the default (2000); 0 disables the cap.",
+            placeholder="2000",
             group="Recall",
         ),
         ProviderField(

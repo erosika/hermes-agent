@@ -934,15 +934,26 @@ def cmd_setup(args) -> None:
         hermes_host["recallMode"] = new_recall
 
     # --- 7. Context token budget ---
-    current_ctx_tokens = hermes_host.get("contextTokens") or cfg.get("contextTokens")
-    current_display = str(current_ctx_tokens) if current_ctx_tokens else "uncapped"
+    current_ctx_tokens = hermes_host.get("contextTokens")
+    if current_ctx_tokens is None:
+        current_ctx_tokens = cfg.get("contextTokens")
+    if current_ctx_tokens is None:
+        current_display = "2000 (default)"
+    elif current_ctx_tokens == 0:
+        current_display = "uncapped"
+    else:
+        current_display = str(current_ctx_tokens)
     print("\n  Context injection per turn (hybrid/context recall modes only):")
-    print("    uncapped -- no limit (default)")
+    print("    default  -- 2000 tokens per turn")
+    print("    uncapped -- no limit")
     print("    N        -- token limit per turn (e.g. 1200)")
     new_ctx_tokens = _prompt("Context tokens", default=current_display)
-    if new_ctx_tokens.strip().lower() in {"none", "uncapped", "no limit"}:
+    cleaned = new_ctx_tokens.strip().lower()
+    if cleaned in {"none", "uncapped", "no limit"}:
+        hermes_host["contextTokens"] = 0
+    elif cleaned == "default":
         hermes_host.pop("contextTokens", None)
-    elif new_ctx_tokens.strip() == "":
+    elif cleaned in {"", current_display.lower()}:
         pass  # keep current
     else:
         try:
@@ -1484,7 +1495,13 @@ def cmd_tokens(args) -> None:
     dialectic = getattr(args, "dialectic", None)
 
     if context is None and dialectic is None:
-        ctx_tokens = hermes.get("contextTokens") or cfg.get("contextTokens") or "(Honcho default)"
+        ctx_tokens = hermes.get("contextTokens")
+        if ctx_tokens is None:
+            ctx_tokens = cfg.get("contextTokens")
+        if ctx_tokens is None:
+            ctx_tokens = "2000 (default)"
+        elif ctx_tokens == 0:
+            ctx_tokens = "uncapped"
         d_chars = hermes.get("dialecticMaxChars") or cfg.get("dialecticMaxChars") or 600
         d_level = hermes.get("dialecticReasoningLevel") or cfg.get("dialecticReasoningLevel") or "low"
         print("\nHoncho budgets\n" + "─" * 40)

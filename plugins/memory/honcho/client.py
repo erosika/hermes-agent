@@ -143,14 +143,27 @@ def _resolve_bool(*vals, default: bool) -> bool:
     return default
 
 
-def _parse_context_tokens(host_val, root_val) -> int | None:
-    """Parse contextTokens: host wins, then root, then None (uncapped)."""
+_UNSET = object()
+
+# Injection budget applied when contextTokens is absent from config.
+DEFAULT_CONTEXT_TOKENS = 2000
+
+
+def _parse_context_tokens(host_val=_UNSET, root_val=_UNSET) -> int | None:
+    """Parse contextTokens: host wins, then root.
+
+    Absent → None (provider applies DEFAULT_CONTEXT_TOKENS at injection).
+    Explicit null or 0 → 0 (uncapped). Integer → that cap.
+    """
     for val in (host_val, root_val):
-        if val is not None:
-            try:
-                return int(val)
-            except (ValueError, TypeError):
-                pass
+        if val is _UNSET:
+            continue
+        if val is None:
+            return 0
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            pass
     return None
 
 
@@ -391,7 +404,8 @@ class HonchoClientConfig:
     # Write frequency: "async" (background thread), "turn" (sync per turn),
     # "session" (flush on session end), or int (every N turns)
     write_frequency: str | int = "async"
-    # Prefetch budget (None = no cap; set to an integer to bound auto-injected context)
+    # Prefetch budget. None = unset (injection defaults to DEFAULT_CONTEXT_TOKENS);
+    # 0 = explicitly uncapped; positive int = cap on auto-injected context.
     context_tokens: int | None = None
     # Dialectic (peer.chat) settings
     # reasoning_level: "minimal" | "low" | "medium" | "high" | "max"
@@ -623,8 +637,8 @@ class HonchoClientConfig:
             save_messages=save_messages,
             write_frequency=write_frequency,
             context_tokens=_parse_context_tokens(
-                host_block.get("contextTokens"),
-                raw.get("contextTokens"),
+                host_block.get("contextTokens", _UNSET),
+                raw.get("contextTokens", _UNSET),
             ),
             dialectic_reasoning_level=(
                 host_block.get("dialecticReasoningLevel")
