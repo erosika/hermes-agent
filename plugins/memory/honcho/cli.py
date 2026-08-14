@@ -1111,9 +1111,8 @@ def _all_profile_host_configs() -> list[tuple[str, str, dict]]:
         if p.name == "default":
             continue
         h = profile_host_key(p.name)
-        # _host_block (not hosts.get) so legacy dot-form keys
-        # ("hermes.work") stay readable per the README's back-compat
-        # promise — the canonical key resolves first, legacy falls back.
+        # _host_block (not hosts.get) so legacy dot-form keys ("hermes.work")
+        # stay readable — the README promises back-compat.
         results.append((p.name, h, _host_block(cfg, h)))
 
     return results

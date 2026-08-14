@@ -1541,9 +1541,8 @@ class HonchoMemoryProvider(MemoryProvider):
                         peer=peer,
                         # Explicit reasoning bypasses the automatic-injection cap.
                         apply_injection_cap=False,
-                        # Explicit tool call: surface timeouts/server errors as
-                        # errors instead of collapsing them into "no result",
-                        # which is indistinguishable from an empty answer.
+                        # Surface timeouts/server errors: a collapsed "no
+                        # result" is indistinguishable from an empty answer.
                         raise_errors=True,
                     )
                 except HonchoAuthError:

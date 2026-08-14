@@ -107,7 +107,6 @@ class TestCmdPeers:
         out = _peers_output(SimpleNamespace())
         assert "hermes.work" not in out
         assert "(not set)" not in out
-        # work row shows the populated block's values
         work_line = [l for l in out.splitlines() if l.strip().startswith("work")][0]
         assert "alice" in work_line and "hermes" in work_line
 

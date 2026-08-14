@@ -491,11 +491,9 @@ class HonchoClientConfig:
         """Create config from environment variables (fallback)."""
         resolved_host = host or resolve_active_host()
         api_key = get_secret("HONCHO_API_KEY")
-        # HONCHO_URL is the SDK's own env var (honcho.client resolves it when
-        # no environment is passed); accept it here so the fallback path
-        # behaves the same as from_global_config() when no config file exists.
-        # Read straight from os.environ, matching HONCHO_BASE_URL: a base URL
-        # is a deployment setting, not a profile-scoped credential.
+        # HONCHO_URL is the SDK's own env var — accept it for parity with
+        # from_global_config(). Read from os.environ, not get_secret: a base
+        # URL is a deployment setting, not a profile-scoped credential.
         base_url = _sanitize_url(
             os.environ.get("HONCHO_BASE_URL", "").strip()
             or os.environ.get("HONCHO_URL", "").strip()
@@ -557,11 +555,8 @@ class HonchoClientConfig:
             or raw.get("apiKey")
             or get_secret("HONCHO_API_KEY")
         )
-        # Named-profile host blocks do NOT inherit the default host's apiKey —
-        # profiles are isolated islands by design (see resolve_active_host).
-        # But the failure mode is silent: the profile runs unauthenticated and
-        # every write 401s while tools report "no context". Warn loudly so the
-        # operator learns the key must be set on THIS host block (#36098, #66125).
+        # The missing-key failure is silent: the profile runs unauthenticated,
+        # every write 401s, tools report "no context". Warn loudly (#36098, #66125).
         if (
             not api_key
             and host_block
@@ -1117,11 +1112,10 @@ def get_honcho_client(config: HonchoClientConfig | None = None) -> Honcho:
         if resolved_base_url:
             logger.info("Initializing Honcho client (base_url: %s, workspace: %s)", resolved_base_url, config.workspace_id)
         else:
-            # No base_url resolved, so the SDK falls back to its own
-            # ENVIRONMENTS map (honcho.client: local -> http://localhost:8000,
-            # production -> https://api.honcho.dev). Name the target at INFO:
-            # a self-hosted user whose config wasn't picked up otherwise sees
-            # a healthy-looking startup and silently talks to the public cloud.
+            # With no base_url the SDK resolves from its ENVIRONMENTS map.
+            # Name the target at INFO: a self-hosted user whose config wasn't
+            # picked up otherwise sees a healthy startup and silently talks to
+            # the public cloud.
             logger.info(
                 "Initializing Honcho client (host: %s, workspace: %s, "
                 "base_url unset — SDK will resolve from environment=%s)",
@@ -1130,11 +1124,10 @@ def get_honcho_client(config: HonchoClientConfig | None = None) -> Honcho:
 
         # Local Honcho instances don't require an API key, but the SDK
         # expects a non-empty string.  Use a placeholder for local URLs.
-        # For local: honor config.api_key when the user set it EXPLICITLY in
-        # honcho.json — host block or top-level (#36098 issue 2: the top-level
-        # key was dropped for the placeholder, 401ing AUTH_USE_AUTH=true
-        # self-hosts). Only an env-sourced key (HONCHO_API_KEY) is still
-        # treated as likely-cloud and skipped for local URLs.
+        # Honor a key set explicitly in honcho.json — host block or top-level;
+        # dropping the top-level key 401'd AUTH_USE_AUTH=true self-hosts
+        # (#36098). Env-sourced HONCHO_API_KEY is still treated as
+        # likely-cloud and skipped.
         _is_local = _is_local_base_url(resolved_base_url)
         if _is_local:
             _raw = config.raw or {}
