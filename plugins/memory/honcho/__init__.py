@@ -1420,9 +1420,6 @@ class HonchoMemoryProvider(MemoryProvider):
         """
         if self._cron_skipped:
             return
-        # ``saveMessages`` is the operator's hard write gate. Previously it
-        # was parsed into HonchoClientConfig but never enforced here, so a
-        # cached hybrid provider kept writing even after containment was set.
         if self._config and not getattr(self._config, "save_messages", True):
             return
         if _is_internal_gateway_turn(user_content):
@@ -1437,11 +1434,9 @@ class HonchoMemoryProvider(MemoryProvider):
         msg_limit = self._config.message_max_chars if self._config else 25000
         clean_user_content = sanitize_context(user_content or "").strip()
         clean_assistant_content = sanitize_context(assistant_content or "").strip()
-        # Skip only when the whole turn is empty. An interrupted or tool-only
-        # turn can legitimately have an empty assistant side; the user's
-        # message must still be persisted (the manager already drops
-        # empty-user turns upstream). Empty sides are skipped per-loop below
-        # so we never write empty-string messages either.
+        # Skip only when the whole turn is empty: an interrupted or tool-only
+        # turn legitimately has an empty assistant side, and the user's message
+        # must still be persisted (the manager drops empty-user turns upstream).
         if not clean_user_content and not clean_assistant_content:
             return
 
@@ -1454,9 +1449,8 @@ class HonchoMemoryProvider(MemoryProvider):
                 if clean_assistant_content:
                     for chunk in self._chunk_message(clean_assistant_content, msg_limit):
                         session.add_message("assistant", chunk)
-                # Route through save() so writeFrequency is honored —
-                # _flush_session() directly bypassed "session"/N batching
-                # and flushed every turn regardless of config.
+                # save() (not _flush_session()) so writeFrequency's
+                # session/N batching is honored.
                 self._manager.save(session)
             except Exception as e:
                 logger.debug("Honcho sync_turn failed: %s", e)
@@ -1486,9 +1480,8 @@ class HonchoMemoryProvider(MemoryProvider):
             return
         if self._cron_skipped:
             return
-        # ``saveMessages`` is the operator's hard write gate; the memory-tool
-        # mirror is an automatic Honcho mutation path and must respect it too,
-        # otherwise containment would only cover conversation turns.
+        # The memory-tool mirror is an automatic Honcho write path —
+        # saveMessages containment must cover it, not just conversation turns.
         if self._config and not getattr(self._config, "save_messages", True):
             return
         if self._recall_mode == "tools" and not self._session_ready():
@@ -1667,10 +1660,9 @@ class HonchoMemoryProvider(MemoryProvider):
         manager = self._manager
         if manager and self._init_thread and self._init_thread.is_alive() and not self._session_initialized:
             manager = None
-        # Honors saveMessages: false — skip persistence, but thread cleanup
-        # still runs: the session manager's async-writer thread must be
-        # joined either way so daemon threads aren't left blocked in httpx
-        # I/O during interpreter finalization.
+        # saveMessages: false skips persistence but not thread cleanup: the
+        # async-writer thread must be joined either way so daemon threads
+        # aren't left blocked in httpx I/O during interpreter finalization.
         if not getattr(self._config, "save_messages", True):
             if manager:
                 try:
@@ -1680,9 +1672,6 @@ class HonchoMemoryProvider(MemoryProvider):
             return
         if manager:
             try:
-                # manager.shutdown() = flush_all() + join the async-writer
-                # thread. Previously only flush_all() ran here, leaving the
-                # writer thread alive at exit.
                 manager.shutdown()
             except Exception:
                 pass

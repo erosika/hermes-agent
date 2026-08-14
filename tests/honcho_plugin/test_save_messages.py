@@ -34,7 +34,6 @@ class TestSyncTurn:
         if p._sync_thread is not None:
             p._sync_thread.join(timeout=5)
         p._manager.get_or_create.assert_called_once()
-        # save() (not _flush_session) so writeFrequency batching is honored
         p._manager.save.assert_called_once()
 
     def test_enabled_writes(self):
