@@ -1099,12 +1099,12 @@ Points at a custom OpenAI-compatible endpoint. Uses `OPENAI_API_KEY` for auth.
 | `nous` / `openrouter` / etc. | not set | Force that provider, use its auth |
 | any | set | Use the custom endpoint directly (provider ignored) |
 
-### Stream progress timeout (Responses routes)
+### Stream progress timeout
 
-When the summary runs over a Responses stream (the `openai-codex` provider, or any route the auxiliary client drives through the Responses API), two timeouts apply, and they are independent:
+When the summary streams (compression always streams over chat-completions and Responses routes, e.g. `openai-codex` or a custom OpenAI-compatible endpoint), two timeouts apply, and they are independent:
 
 - `auxiliary.compression.timeout` — the overall request budget (default 120s).
-- `auxiliary.compression.no_progress_timeout` — how long the stream may go without a **substantive** event (a text/reasoning delta or a completed output item) before the attempt aborts with `Codex auxiliary Responses stream stalled: no new output for Ns`. Default **60s** when unset. Keepalive and lifecycle frames (`response.in_progress`, pings) do not count as progress; every substantive event re-arms the window, so a slow but progressing summary is never cut off by it.
+- `auxiliary.compression.no_progress_timeout` — how long the stream may go without a **substantive** event (a text/reasoning delta or a completed output item) before the attempt aborts (`... stream stalled: no new output for Ns`) and the normal retry / fallback chain takes over. Default **60s** when unset. On a chat-completions stream the window starts at the first token. Before it, a remote endpoint gets the main loop's stale patience (the provider's `providers.<id>.stale_timeout_seconds` when set, else 180s raised for large prompts and to 600s for reasoning models such as o3 or DeepSeek R1; capped at `timeout`), so a model thinking silently is not cut. On a local endpoint (localhost, LAN, Tailscale) a silent prefill is bounded only by `timeout`. The same rule applies to every streamed auxiliary task, including MoA reference calls. Keepalive and lifecycle frames (`response.in_progress`, pings) do not count as progress; every substantive event re-arms the window, so a slow but progressing summary is never cut off by it.
 
 Raising `timeout` alone does **not** widen the progress window — a request configured for 600s still aborts after a 60s gap. Set `no_progress_timeout` to change that gap; the effective window is capped at `timeout`, and the host's hard deadline / cancellation still win. The host's own inactivity budget is the outer cap here: in-agent compaction gives up on a silent summariser after `compression.context_timeout_seconds` (default 120s, floored at the effective `auxiliary.compression.timeout`, itself at least 300s) and gateway hygiene after `compression.hygiene_timeout_seconds` (default 30s), so a `no_progress_timeout` larger than the applicable host budget is silently cut short by it. The key is per task (`auxiliary.<task>.no_progress_timeout`), so widening it for compression does not change other auxiliary tasks. A value that is not a positive number is ignored with a warning in the log and the 60s default applies.
 
@@ -1565,8 +1565,8 @@ auxiliary:
   # Context compression timeout (separate from compression.* config)
   compression:
     timeout: 120               # seconds — compression summarizes long conversations, needs more time
-    # no_progress_timeout: 60   # Responses-stream routes (openai-codex) only: seconds a summary stream
-    #                           # may go without a substantive event before the attempt fails fast
+    # no_progress_timeout: 60   # seconds a streamed summary may go without a substantive chunk
+    #                           # before the attempt fails fast into retry/fallback
     # fallback_chain:           # Optional — providers to try on rate-limit / connectivity failure
     #   - provider: nous
     #     model: deepseek/deepseek-chat
@@ -2387,7 +2387,7 @@ display:
 
 From the CLI, use the canonical path — `hermes config set display.platforms.telegram.streaming false`. The shorthand `hermes config set platforms.telegram.streaming false` is accepted too: because per-platform *display* settings (`streaming`, `show_reasoning`, `tool_progress`, …) are only ever read from `display.platforms`, `config set`/`get`/`unset` redirect that shorthand to the canonical key and print a note. Connection keys under the top-level `platforms.<name>` block (`token`, `enabled`, `reply_to_mode`, `extra`) are not redirected. Writing them under the nested prefix (`hermes config set gateway.platforms.telegram.enabled true`) is redirected to the top-level `platforms.telegram.enabled` with a note: the gateway reads both blocks, but the top-level one wins on shared keys, so a nested write would be silently shadowed by an existing top-level value.
 
-Platforms without an override fall back to the global `tool_progress` value. Valid platform keys: `telegram`, `discord`, `slack`, `signal`, `whatsapp`, `matrix`, `mattermost`, `email`, `sms`, `homeassistant`, `dingtalk`, `feishu`, `wecom`, `weixin`, `bluebubbles`, `qqbot`. The legacy `display.tool_progress_overrides` key still loads for backward compatibility but is deprecated and migrated into `display.platforms` on first load.
+Platforms without an override fall back to the global `tool_progress` value. Valid platform keys: `telegram`, `discord`, `slack`, `signal`, `whatsapp`, `matrix`, `mattermost`, `email`, `sms`, `dingtalk`, `feishu`, `wecom`, `weixin`, `bluebubbles`, `qqbot`, plus the name of any plugin platform (e.g. `homeassistant` from the Home Assistant plugin). The legacy `display.tool_progress_overrides` key still loads for backward compatibility but is deprecated and migrated into `display.platforms` on first load.
 
 Signal is listed as a valid platform key because the setting can be saved per platform, but the current Signal adapter cannot edit sent messages and does not render tool-progress bubbles. Keep Signal `tool_progress` set to `off`; use the CLI or an editing-capable messaging platform if you need to watch each tool call live.
 
@@ -2453,6 +2453,9 @@ stt:
     language: ""               # per-provider override of stt.language
     timeout: 60                # seconds per transcription request; raise for self-hosted model cold starts
     max_retries: 1             # SDK transport retries (connection errors, 408/409/429/5xx); 0 = single attempt
+  xai:
+    model: "grok-voice-transcribe-2.0"  # or grok-voice-transcribe-1.0; sent on every request
+    language: ""               # per-provider override of stt.language
   # model: "whisper-1"         # Legacy fallback key still respected
 ```
 
@@ -2470,6 +2473,8 @@ Provider behavior:
 
 Cloud providers (groq, openai, mistral, xai, elevenlabs, deepinfra) get a **pre-upload silence trim** by default when `ffmpeg` is installed: long pauses in a voice note are collapsed client-side before the file uploads, keeping `cloud_trim_keep_ms` of each pause so natural pacing survives. Shorter audio means faster uploads, lower per-audio-minute billing, and fewer silence hallucinations from the remote model. Clips shorter than 12 seconds skip the trim entirely (savings can't matter there, and several providers bill a per-request minimum anyway). The trim is best-effort — if ffmpeg is missing, the trim fails, the clip is mostly silence, or trimming would save less than ~10%, the original file is uploaded untouched. Set `stt.cloud_trim_silence: false` to always upload the original (e.g. when transcribing music or ambient audio through a cloud provider). Command-type and plugin providers never get trimmed audio.
 
+Recordings over the provider's per-request upload limit (25 MB for OpenAI/Groq/DeepInfra, 500 MB for Mistral and xAI, about 5 GB for ElevenLabs, plus per-model length limits for OpenAI's `gpt-4o-transcribe` family and `whisper-1`) are re-encoded to compact AAC and, if still too large, split at pauses and transcribed piece by piece. See [Long recordings and upload limits](features/voice-mode.md#long-recordings-and-upload-limits).
+
 An explicitly selected `stt.provider` is honored strictly — if it's unavailable, transcription errors with guidance to run `hermes tools` rather than switching providers. Only when no provider has ever been selected does Hermes auto-detect in this order: `local` → `groq` → `openai`.
 
 Groq and OpenAI model overrides are environment-driven:
@@ -2477,6 +2482,7 @@ Groq and OpenAI model overrides are environment-driven:
 ```bash
 STT_GROQ_MODEL=whisper-large-v3-turbo
 STT_OPENAI_MODEL=whisper-1
+STT_XAI_MODEL=grok-voice-transcribe-2.0
 GROQ_BASE_URL=https://api.groq.com/openai/v1
 STT_OPENAI_BASE_URL=https://api.openai.com/v1
 ```

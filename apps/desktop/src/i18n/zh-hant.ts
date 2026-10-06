@@ -13,6 +13,28 @@ import { zhHantDiagnostics } from './zh-hant_diagnostics'
 import { zhHantSettings } from './zh-hant_settings'
 
 export const zhHant = defineLocale({
+  memoryDiscovery: {
+    installed: '已安裝',
+    availableToInstall: '可安裝',
+    installationRequired: '需要安裝',
+    reviewInstall: '審核並安裝',
+    exploreAll: '瀏覽全部…',
+    missing: '缺失',
+    installConsent: '安裝並啟用外掛及其依賴。目前的記憶供應商保持不變，直到你明確選擇使用它。',
+    builtin: '內建',
+    providerSettings: '供應商設定',
+    configureElsewhere: '請使用 CLI 設定，或更新 Hermes 以儲存設定而不啟用。',
+    notReady: '請完成設定並安裝缺少的依賴。剛安裝後請重新啟動後端，再重試。',
+    useFailed: '無法使用此供應商。請檢查設定後重試。',
+
+    active: '使用中',
+    useProvider: '使用提供者',
+    loadFailed: '無法載入記憶提供者',
+    ownerChanged: '請切換回開啟此安裝程式時的連線和設定檔，然後重試。',
+    notDiscovered: '套件已安裝，但尚未發現其記憶提供者。請返回記憶設定重新探索。',
+    installedNotice: '已發現提供者。請先設定，再明確選擇使用。',
+    backToMemory: '返回記憶設定'
+  },
   skillDeepLink: {
     installTitle: (name: string) => `安裝「${name}」？`,
     installDescription: '此技能將於新的工作階段中可用。請僅安裝可信來源的內容。',
@@ -36,11 +58,12 @@ export const zhHant = defineLocale({
       '共享指標只包含有上限的計數，絕不包含提示詞、檔案、路徑或錯誤文字。收集僅在本機進行；傳送給 Nous 需要另行同意。',
     whatIsCollected: '收集哪些內容',
     collectedIntro: '僅限有上限的計數：',
-    collectedActivity: '活動、工作階段長度、結果和錯誤類別',
+    collectedActivity:
+      '活動、工作階段長度、結果和錯誤類別，包括記憶寫入或上下文壓縮被拒絕、失敗或略過時的原因（來自固定清單）',
     collectedModels: '模型路由和 token 總量',
     collectedNames: '內建工具、指令和目錄項名稱',
     collectedMilestones: '分組的設定計數',
-    collectedReliability: '更新結果與耗時、當機、啟動與回覆速度、訊息平台狀態',
+    collectedReliability: '更新和安裝的結果與耗時（失敗時包括來自固定清單的原因和所在階段；全新安裝記錄在本機，僅在你同意後計入）、當機、啟動與回覆速度、訊息平台狀態',
     collectedUsage:
       'Hermes 的使用方式：代理的準確度與效率（編輯是否成功、迴圈、錯誤後的恢復、每個任務的 token 與工具呼叫數、快取中斷），各介面與 Desktop 模式的活躍時間，哪些應用程式區域、操作與設定被使用、很快關閉或被關閉，以及供應商設定的結果',
     collectedMachine:
@@ -48,7 +71,7 @@ export const zhHant = defineLocale({
     installId:
       '傳送會把每日資料包上傳到 Nous 遙測服務。資料包帶有此設定檔的安裝 ID：一個不含個人資訊的固定隨機 UUID，刪除共享指標目錄即可重設。',
     consentWindow:
-      '只有整個收集期間都落在已記錄同意時段內的資料包才會被傳送——你同意之前的資料，或傳送關閉期間的資料，都會留在本機。你可以隨時再次關閉傳送。',
+      '只有整個收集期間都落在已記錄同意時段內的資料包才會被傳送。除全新安裝記錄（記錄在本機，僅在你同意後計入）外，你同意之前的資料，或傳送關閉期間的資料，都會留在本機。你可以隨時再次關閉傳送。',
     readDocs: '查看完整說明',
     share: '收集並傳送給 Nous',
     local: '僅在本機收集',
@@ -61,6 +84,7 @@ export const zhHant = defineLocale({
     sendDesc: '將每日資料包上傳到 Nous 遙測服務。只傳送同意時段內的資料。需要先開啟收集。',
     unavailable: '請更新 Hermes 後端以變更此設定。',
     stripBody: '僅限有界計數器，絕不包含提示詞或檔案。',
+    stripReaskBody: '再次詢問：舊版本可能在你看到此問題之前就已儲存了「不用了」。',
     stripChoices: { share: '傳送給 Nous', local: '僅限本機', off: '不用了' },
     stripDetails: '詳細資訊'
   },
@@ -71,6 +95,7 @@ export const zhHant = defineLocale({
   boot: zhHantBoot.boot,
   notifications: zhHantDiagnostics.notifications,
   remoteDisplayBanner: zhHantBoot.remoteDisplayBanner,
+  butterbar: zhHantBoot.butterbar,
   billingBlock: zhHantCommon.billingBlock,
   sendDiagnostics: zhHantDiagnostics.sendDiagnostics,
   titlebar: zhHantChrome.titlebar,
